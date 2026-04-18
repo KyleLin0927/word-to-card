@@ -1,0 +1,6 @@
+.env
+.venv
+captures/
+vocabulary/
+word_to_card.log
+.DS_Store
