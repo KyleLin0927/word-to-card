@@ -99,9 +99,11 @@ macOS 全域工具：
 - 程式需能容忍 Gemini 偶發的輸出格式偏差（例如回傳單一物件、`{"words":[...]}` 包裝、或含 markdown code fence）。
 - 在進入主流程前，需將回傳正規化為 `list[dict]`，且每筆至少包含有效 `word` 欄位。
 - 若輸出不符合可解析格式，流程不應造成 thread crash，需轉為一般失敗處理（通知/佇列）。
+- **可觀測性**：當 Gemini 回傳內容無法 JSON 解析時，log 需記錄「原始回應內容」與「清理 code fence 後內容」（可截斷）以利除錯。
 
 ### 驗收條件
 - **AC1**：不應再出現 `TypeError: string indices must be integers, not 'str'` 這類因回傳結構不符導致的執行緒崩潰。
+- **AC2**：若 Gemini 回傳格式錯誤導致 JSONDecodeError，`word_to_card.log` 可看到該次回應的原始文字內容（至少包含錯誤附近片段）。
 
 ## 需求：單字去重（本地歷史 / 同批 / 佇列重試）
 - **正規化規則**：去重比對時需對 `word` 做正規化（`strip` 去除前後空白、`lower` 忽略大小寫，並將連續空白視為同一個空白）。

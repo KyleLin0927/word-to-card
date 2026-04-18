@@ -4,6 +4,7 @@ Gemini Vision 模組（google-genai 新版 SDK）
 """
 
 import json
+import logging
 import pathlib
 
 from google import genai
@@ -13,6 +14,7 @@ import config
 
 _client = genai.Client(api_key=config.GEMINI_API_KEY)
 _resolved_model: str | None = None
+log = logging.getLogger(__name__)
 
 PROMPT = """你是一位專業英文老師，專門協助學生準備 GRE / TOEFL 考試。
 
@@ -70,6 +72,28 @@ def _extract_json_text(text: str) -> str:
         lines = text.split("\n")
         text = "\n".join(lines[1:-1])
     return text.strip()
+
+
+def _clip_for_log(text: str, max_len: int = 2000) -> str:
+    text = str(text or "").strip()
+    if len(text) <= max_len:
+        return text
+    return f"{text[:max_len]} ...<truncated {len(text) - max_len} chars>"
+
+
+def _decode_words_response(response: object, *, error_key: str, context: str) -> list[dict]:
+    raw_text = str(getattr(response, "text", "") or "")
+    json_text = _extract_json_text(raw_text)
+    try:
+        parsed = json.loads(json_text)
+    except json.JSONDecodeError as exc:
+        log.error("Gemini %s 回傳 JSON 解析失敗：%s", context, exc)
+        if raw_text.strip():
+            log.error("Gemini %s 原始回應：%s", context, _clip_for_log(raw_text))
+        if json_text.strip() and json_text != raw_text:
+            log.error("Gemini %s 去除 code fence 後：%s", context, _clip_for_log(json_text))
+        raise
+    return _normalize_words_payload(parsed, error_key=error_key)
 
 
 def _synonym_list(raw: object) -> list[str]:
@@ -346,9 +370,7 @@ def analyze_image(image_path: str) -> list[dict]:
                 last_err = e2
         else:
             raise last_err
-    text = _extract_json_text(response.text)
-    parsed = json.loads(text)
-    return _normalize_words_payload(parsed, error_key="IMAGE_UNCLEAR")
+    return _decode_words_response(response, error_key="IMAGE_UNCLEAR", context="image")
 
 
 def analyze_text(text_input: str) -> list[dict]:
@@ -398,6 +420,4 @@ def analyze_text(text_input: str) -> list[dict]:
         else:
             raise last_err
 
-    text = _extract_json_text(response.text)
-    parsed = json.loads(text)
-    return _normalize_words_payload(parsed, error_key="NOT_A_WORD")
+    return _decode_words_response(response, error_key="NOT_A_WORD", context="text")
