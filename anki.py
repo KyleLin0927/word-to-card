@@ -13,18 +13,27 @@ W2C_AUDIO_MARKER = "__W2C_AUDIO__"
 
 HR_BETWEEN_SENSES = '<hr style="border:none;border-top:1px solid #eee;margin:16px 0">'
 
-# 例句內目標詞：模型以 ⟦…⟧ 標記，產卡時轉紅（避免模型輸出任意 HTML）
+# 義項內「英文釋義」與「詞性＋中文釋義」兩行（較大）
+_FONT_DEF_PX = 22
+# Synonyms／Usage／Examples、Front 音標／難度等其餘內文
+_FONT_BODY_PX = 18
+# Front 單字（大標）
+_FONT_WORD_PX = 32
+
+# 例句內目標詞：模型以 ⟦…⟧ 標記，產卡時轉粗體＋底線、字色繼承（避免模型輸出任意 HTML）
 _EXAMPLE_HL_OPEN = "\u27e6"
 _EXAMPLE_HL_CLOSE = "\u27e7"
 _EXAMPLE_HL_PATTERN = re.compile(
     re.escape(_EXAMPLE_HL_OPEN) + r"(.*?)" + re.escape(_EXAMPLE_HL_CLOSE),
     re.DOTALL,
 )
-_EXAMPLE_HL_SPAN = '<span style="color:#c62828;font-style:inherit">{}</span>'
+_EXAMPLE_HL_SPAN = (
+    '<span style="font-weight:bold;text-decoration:underline;font-style:inherit;color:inherit">{}</span>'
+)
 
 
 def _example_line_to_html(line: str) -> str:
-    """將 example_sentence 單行中的 ⟦…⟧ 轉為紅色 span，其餘字元 escape。"""
+    """將 example_sentence 單行中的 ⟦…⟧ 轉為粗體＋底線（預設字色）span，其餘字元 escape。"""
     if not line:
         return ""
     parts: list[str] = []
@@ -67,9 +76,9 @@ def _build_usage_block(usage_value: object, *, margin_top: str = "12px") -> str:
         return ""
     usage_list = "".join(f"<li>{u}</li>" for u in usage_items)
     return (
-        f'<div style="margin-top:{margin_top};font-size:13px;color:#666;text-align:left">'
+        f'<div style="margin-top:{margin_top};font-size:{_FONT_BODY_PX}px;line-height:1.5;text-align:left">'
         '<div style="font-weight:600;margin-bottom:4px">Usage:</div>'
-        f'<ul style="margin:0;padding-left:18px">{usage_list}</ul>'
+        f'<ul style="margin:0;padding-left:1.1em">{usage_list}</ul>'
         "</div>"
     )
 
@@ -120,7 +129,7 @@ def _build_synonyms_line(sense: dict) -> str:
     if not items:
         return ""
     return (
-        '<div style="margin-top:10px;font-size:13px;color:#888;text-align:left">'
+        f'<div style="margin-top:10px;font-size:{_FONT_BODY_PX}px;line-height:1.5;text-align:left">'
         f'Synonyms: {", ".join(items)}</div>'
     )
 
@@ -131,9 +140,9 @@ def _build_examples_for_sense(sense: dict) -> str:
         return ""
     html_lines = [_example_line_to_html(ln) for ln in lines]
     return (
-        '<div style="margin-top:14px;color:#555;text-align:left">'
-        '<div style="font-size:12px;font-weight:600;letter-spacing:0.2px;margin-bottom:4px">Examples:</div>'
-        f'<div style="font-size:14px;font-style:italic">{"<br>".join(html_lines)}</div>'
+        '<div style="margin-top:14px;text-align:left">'
+        f'<div style="font-size:{_FONT_BODY_PX}px;font-weight:600;letter-spacing:0.2px;margin-bottom:4px">Examples:</div>'
+        f'<div style="font-size:{_FONT_BODY_PX}px;line-height:1.5;font-style:italic">{"<br>".join(html_lines)}</div>'
         "</div>"
     )
 
@@ -144,21 +153,23 @@ def _build_one_sense_inner(sense: dict) -> str:
     de = str(sense.get("definition", "")).strip()
     dz = str(sense.get("definition_zh", "")).strip()
     if de:
-        parts.append(f'<div style="font-size:17px;font-weight:bold">{de}</div>')
-    # 詞性與中文釋義同一行，整行使用原中文釋義字級／顏色（詞性在前，空格後接中文）
+        parts.append(
+            f'<div style="font-size:{_FONT_DEF_PX}px;font-weight:bold;line-height:1.45">{de}</div>'
+        )
+    # 詞性與中文釋義同一行（與英文釋義同為較大字級、一般字重）
     if pos and dz:
         parts.append(
-            '<div style="font-size:14px;color:#666;margin-top:4px;line-height:1.45">'
+            f'<div style="font-size:{_FONT_DEF_PX}px;margin-top:4px;line-height:1.5">'
             f"{pos} {dz}"
             "</div>"
         )
     elif dz:
         parts.append(
-            f'<div style="font-size:14px;color:#666;margin-top:4px;line-height:1.45">{dz}</div>'
+            f'<div style="font-size:{_FONT_DEF_PX}px;margin-top:4px;line-height:1.5">{dz}</div>'
         )
     elif pos:
         parts.append(
-            f'<div style="font-size:14px;color:#666;margin-top:4px;line-height:1.45">{pos}</div>'
+            f'<div style="font-size:{_FONT_DEF_PX}px;margin-top:4px;line-height:1.5">{pos}</div>'
         )
     syn = _build_synonyms_line(sense)
     if syn:
@@ -176,14 +187,14 @@ def _build_front(word: dict) -> str:
     phonetic = word.get("phonetic", "")
     difficulty = str(word.get("difficulty", "") or "").strip()
     diff_html = (
-        f'<div style="font-size:12px;color:#bbb;text-align:center;margin-top:10px">{difficulty}</div>'
+        f'<div style="font-size:{_FONT_BODY_PX}px;text-align:center;margin-top:10px;line-height:1.5">{difficulty}</div>'
         if difficulty
         else ""
     )
     return (
-        f'<div style="font-size:28px;font-weight:bold;text-align:center;margin-bottom:6px">'
+        f'<div style="font-size:{_FONT_WORD_PX}px;font-weight:bold;text-align:center;margin-bottom:6px;line-height:1.2">'
         f'{word["word"]}</div>'
-        f'<div style="font-size:14px;color:#888;text-align:center">{phonetic}</div>'
+        f'<div style="font-size:{_FONT_BODY_PX}px;text-align:center;line-height:1.5">{phonetic}</div>'
         f'<div style="text-align:center;margin-top:8px">{W2C_AUDIO_MARKER}</div>'
         f"{diff_html}"
     )
@@ -192,7 +203,7 @@ def _build_front(word: dict) -> str:
 def _build_back(word: dict) -> str:
     senses = _senses_for_card(word)
     if not senses:
-        return '<div style="color:#999;text-align:left">(no definitions)</div>'
+        return f'<div style="font-size:{_FONT_BODY_PX}px;line-height:1.5;text-align:left">(no definitions)</div>'
     chunks: list[str] = [f'<div style="text-align:left">{_build_one_sense_inner(senses[0])}</div>']
     if len(senses) == 1:
         return "".join(chunks)
