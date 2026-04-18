@@ -24,7 +24,7 @@ import queue_manager
 import word_archive
 from anki import add_cards_to_anki_results
 from llm import analyze_image, analyze_text, get_effective_model_name
-from notify import notify
+from notify import notify, notify_success
 from screenshot import take_screenshot
 
 
@@ -191,7 +191,7 @@ def process_selection() -> None:
                 (f"Anki 可能皆為重複：{names}" if names else "Anki 未新增任何筆記（可能皆為重複）"),
             )
         else:
-            notify(f"已新增 {added} 張卡片", word_preview or "（無預覽文字）")
+            notify_success(f"已新增 {added} 張卡片", word_preview or "（無預覽文字）")
         log.info("完成：新增 %d 張卡片（%s）", added, word_preview)
     except Exception as e:
         log.error("反白取詞流程失敗：%s", e)
@@ -275,7 +275,7 @@ def process_screenshot() -> None:
             (f"Anki 可能皆為重複：{names}" if names else "Anki 未新增任何筆記（可能皆為重複）"),
         )
     else:
-        notify(f"已新增 {added} 張卡片", word_preview or "（無預覽文字）")
+        notify_success(f"已新增 {added} 張卡片", word_preview or "（無預覽文字）")
 
 
 def retry_queue() -> None:

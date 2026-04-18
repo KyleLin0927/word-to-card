@@ -1,5 +1,8 @@
 import logging
+import os
 import subprocess
+
+import config
 
 log = logging.getLogger(__name__)
 
@@ -38,3 +41,28 @@ def notify(title: str, message: str) -> None:
             )
     except Exception as e:
         log.warning("通知執行失敗：%s", e)
+
+
+def _play_success_sound() -> None:
+    if not config.NOTIFY_SUCCESS_SOUND:
+        return
+    path = config.NOTIFY_SUCCESS_SOUND_FILE or "/System/Library/Sounds/Glass.aiff"
+    if not os.path.isfile(path):
+        log.warning("成功音效檔不存在，略過：%s", path)
+        return
+    try:
+        subprocess.Popen(
+            ["afplay", path],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception as e:
+        log.warning("播放成功音效失敗：%s", e)
+
+
+def notify_success(title: str, message: str) -> None:
+    """
+    實際新增卡片後使用：仍送通知中心，並加上不依賴橫幅顯示的備援（預設短音效）。
+    """
+    notify(title, message)
+    _play_success_sound()

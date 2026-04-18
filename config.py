@@ -41,3 +41,11 @@ HOTKEY_SELECTIONS = os.environ.get(
     "<ctrl>+c",
 )
 HOTKEY_SELECTIONS_DISPLAY = os.environ.get("HOTKEY_SELECTIONS_DISPLAY", "⌃+C")
+
+# 成功新增 Anki 卡片後：除通知中心外，預設再播放短音效（多螢幕／Focus 下橫幅可能不出現）
+_nss = os.environ.get("NOTIFY_SUCCESS_SOUND", "true").strip().lower()
+NOTIFY_SUCCESS_SOUND = _nss not in ("0", "false", "no", "off")
+NOTIFY_SUCCESS_SOUND_FILE = os.environ.get(
+    "NOTIFY_SUCCESS_SOUND_FILE",
+    "/System/Library/Sounds/Glass.aiff",
+).strip()
