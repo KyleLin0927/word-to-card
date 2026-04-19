@@ -2,8 +2,11 @@
 venv/
 captures/
 vocabulary/
+vocabulary_phrases/
 word_to_card.log
+pending_tasks_phrases.json
 word_history.json
 word_history/
+phrase_history/
 .DS_Store
 __pycache__/

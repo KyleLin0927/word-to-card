@@ -60,6 +60,32 @@ else:
     WORD_ARCHIVE_BASE = os.path.join(_base_dir, "vocabulary")
 WORD_ARCHIVE_DIR = os.path.join(WORD_ARCHIVE_BASE, DECK_SLUG)
 
+# ── 片語 Cloze 牌組（與單字獨立）──────────────────────────────
+ANKI_PHRASE_DECK_NAME = os.environ.get("ANKI_PHRASE_DECK_NAME", "Vocabulary::Phrases")
+PHRASE_DECK_SLUG = _deck_slug(ANKI_PHRASE_DECK_NAME)
+ANKI_PHRASE_MODEL_NAME = os.environ.get("ANKI_PHRASE_MODEL_NAME", "Cloze")
+ANKI_PHRASE_FIELD_TEXT = os.environ.get("ANKI_PHRASE_FIELD_TEXT", "Text")
+ANKI_PHRASE_FIELD_EXTRA = os.environ.get("ANKI_PHRASE_FIELD_EXTRA", "Back Extra")
+
+MAX_PHRASES_PER_RESPONSE = max(1, min(12, int(os.environ.get("MAX_PHRASES_PER_RESPONSE", "1"))))
+
+# 片語：去重歷史（獨立 phrase_history/<slug>.json，與單字 word_history 分離）
+PHRASE_HISTORY_DIR = os.path.join(_base_dir, "phrase_history")
+PHRASE_HISTORY_FILE = os.path.join(PHRASE_HISTORY_DIR, f"{PHRASE_DECK_SLUG}.json")
+
+# 片語：封存 vocabulary_phrases/<slug>/
+_pae = os.environ.get("PHRASE_ARCHIVE_ENABLED", "true").strip().lower()
+PHRASE_ARCHIVE_ENABLED = _pae not in ("0", "false", "no", "off")
+_phab = os.environ.get("PHRASE_ARCHIVE_DIR", "").strip()
+if _phab:
+    PHRASE_ARCHIVE_BASE = _phab if os.path.isabs(_phab) else os.path.join(_base_dir, _phab)
+else:
+    PHRASE_ARCHIVE_BASE = os.path.join(_base_dir, "vocabulary_phrases")
+PHRASE_ARCHIVE_DIR = os.path.join(PHRASE_ARCHIVE_BASE, PHRASE_DECK_SLUG)
+
+# 片語截圖失敗佇列（與單字 pending_tasks.json 分離）
+QUEUE_FILE_PHRASE = os.path.join(_base_dir, "pending_tasks_phrases.json")
+
 # pynput GlobalHotKeys 格式
 # - 截圖模式：Cmd+Ctrl+S
 # - 反白取詞（剪貼簿攔截）：Ctrl+C
@@ -73,6 +99,12 @@ HOTKEY_SELECTIONS = os.environ.get(
     "<ctrl>+c",
 )
 HOTKEY_SELECTIONS_DISPLAY = os.environ.get("HOTKEY_SELECTIONS_DISPLAY", "⌃+C")
+
+# 片語模式：截圖 / 反白（反白仍用 Cmd+C 讀取選取範圍）
+HOTKEY_SCREENSHOT_PHRASE = os.environ.get("HOTKEY_SCREENSHOT_PHRASE", "<cmd>+<ctrl>+d")
+HOTKEY_SCREENSHOT_PHRASE_DISPLAY = os.environ.get("HOTKEY_SCREENSHOT_PHRASE_DISPLAY", "⌘+⌃+D")
+HOTKEY_PHRASE_SELECTIONS = os.environ.get("HOTKEY_PHRASE_SELECTIONS", "<ctrl>+v")
+HOTKEY_PHRASE_SELECTIONS_DISPLAY = os.environ.get("HOTKEY_PHRASE_SELECTIONS_DISPLAY", "⌃+V")
 
 # 成功新增 Anki 卡片後：除通知中心外，預設再播放短音效（多螢幕／Focus 下橫幅可能不出現）
 _nss = os.environ.get("NOTIFY_SUCCESS_SOUND", "true").strip().lower()

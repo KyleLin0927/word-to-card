@@ -20,6 +20,7 @@ macOS 全域工具：
 1. **`config.py`**: 
    - 讀取 `.env` 中的 `GEMINI_API_KEY`。
    - 依 **`ANKI_DECK_NAME`** 計算 **`DECK_SLUG`**（Anki 階層 `::` 轉為 `__`，檔名不安全字元替換），供 **`vocabulary/<slug>/`** 與 **`word_history/<slug>.json`** 使用。
+   - 依 **`ANKI_PHRASE_DECK_NAME`** 計算 **`PHRASE_DECK_SLUG`**（片語歷史／封存路徑）；設定片語 **`Cloze`** 模型與欄位名（可 `.env` 覆寫）。
    - 設定 Anki 牌組名稱與模型名稱（預設 `Basic`，可透過 `.env` 的 `ANKI_MODEL_NAME` 覆寫）。
 2. **`notify.py`**: 
    - 封裝 `osascript` 提供系統彈窗通知。
@@ -32,7 +33,9 @@ macOS 全域工具：
    - 記錄已成功的單字卡，防止重複建立；歷史檔依**當前牌組 slug** 分檔（見「單字去重」）；可讀取舊版根目錄 `word_history.json` 相容。
 5. **`word_archive.py`**:
    - 在 Anki **實際成功新增**的單字上，將 Gemini 產生的精簡單字 JSON（含選填 `roots_memory`）另存至本地目錄（與 Anki 牌組並行，供使用者自行備份或版本管理）。
-6. **`main.py`**:
+6. **`phrase_history.py`** / **`phrase_archive.py`** / **`phrase_queue_manager.py`**:
+   - 片語 Cloze：依 **`ANKI_PHRASE_DECK_NAME`** 計算 **`PHRASE_DECK_SLUG`**，記錄 **`phrase_history/<slug>.json`**（與單字 **`word_history/<slug>.json`** 分開目錄）、封存 **`vocabulary_phrases/<slug>/`**；失敗時 **`pending_tasks_phrases.json`**（與單字 **`pending_tasks.json`** 分離）。
+7. **`main.py`**:
    - 監聽快捷鍵：
      - 截圖模式：`<cmd>+<ctrl>+s`
      - 反白取詞模式（剪貼簿攔截）：預設 `Ctrl+C`（可透過 `.env` 覆寫）
@@ -272,8 +275,62 @@ macOS 全域工具：
 - **AC2**：`WORD_ARCHIVE_ENABLED=false` 時，不建立或更新 `vocabulary/`（或指定目錄）中的檔案。
 - **AC3**：佇列重試成功新增時，行為與即時流程一致（成功筆數仍會寫入本地）。
 
+## 需求：片語 Cloze 牌組（GRE／TOEFL 搭配／慣用語）
+
+### 背景與目標
+- 與現有「單字卡」並行，新增一套**片語／搭配**卡片：正面為**含該片語的完整句子**，片語以**克漏字（Cloze）**隱藏；背面提供完整片語、**整句中文譯文**、釋義、用法提示、同義替換等。
+- 輸入可為**反白／剪貼簿一段文字**或**截圖區域**；若為長篇，由模型**只挑一個**最值得收錄的搭配（對應雅思考官／托福閱寫／學術與商用英文優先；預設每回**僅一筆**，見 `MAX_PHRASES_PER_RESPONSE`）。
+- 若判定**無值得收錄的搭配**（例如僅泛用文法骨架、無考試／語用價值）、或無法產出合格例句／克漏字，則**不新增任何卡片**，不寫入歷史／封存。
+
+### 快捷鍵（與既有模式分離）
+- **截圖—片語模式**：預設流程同截圖（框選區域），但送交 **片語專用** Gemini 管線與牌組。
+  - 環境變數 **`HOTKEY_SCREENSHOT_PHRASE`**（預設 `<cmd>+<ctrl>+d`，可覆寫）。
+- **反白—片語模式**：沿用剪貼簿攔截（模擬 `Cmd+C`），接受**片語、整句或段落**；快捷鍵自訂（預設 **`<ctrl>+v`**，使用者接受與系統貼上之潛在衝突）。
+  - 環境變數 **`HOTKEY_PHRASE_SELECTIONS`**（逗號分隔多組）。
+  - 展示用 **`HOTKEY_PHRASE_SELECTIONS_DISPLAY`**（選填）。
+
+### Anki：牌組與筆記類型
+- **牌組名稱**：由 **`ANKI_PHRASE_DECK_NAME`** 指定（與 **`ANKI_DECK_NAME`** 獨立）。
+- **模型**：須支援 **Cloze**（預設 **`ANKI_PHRASE_MODEL_NAME=Cloze`**）。主欄位寫入含 `{{c1::…}}` 之文句；背面延伸寫入 **`Back Extra`**（或版型對應欄位，見「待確認」）。
+- **duplicateScope**：同單字以 **deck** 為範圍；片語牌組與單字牌組互不影響。
+
+### 卡片版面（目標）
+**正面**：**Context Sentence** — 由 Gemini **一次寫成完整一行**：英文句 + **`{{c1::…}}`** + **緊接**半形空格與 **`(語意錨點)`**（極短中文，非整句譯）。例：`The theory is rooted {{c1::in}} (紮根於) traditional philosophy.`。程式以 **`phrase_front`** 原文（或後備：`cloze_text` 僅英文 + **`semantic_anchor_zh`** 自動拼接）寫入 Anki「Text」；**外層**以 `text-align:left` **置左對齊**。克漏字仍僅包住結構詞。送進 Anki 前，與 **`phrase` 對應之可見英文**（克漏字**前**之實詞、及少數**後綴**）加 `<u>` 底線。
+
+**背面**：最上方為整句**中文譯文**（僅內文）；其下為橫向分隔線，再 **Full Phrase**（標題 + 片語行含錨點括號）；之後 **Definition**、**Usage Note**（**一段**連續文字：`usage_note` + 必要時句號 + **`register_zh`**，無「語域：」標籤；`register_zh` **僅**在偏書面時由模型填寫）、**Synonyms** — 以 `Back Extra` 內 HTML 呈現。
+
+### Gemini 輸出（片語）
+- **回傳**：嚴格 JSON；**`phrases`** 為陣列，預設**長度為 0 或 1**（無合格搭配則 `[]`；有則**只收錄一個**對使用者價值最高的搭配，**不並列多個次要候選**）。若環境變數提高 `MAX_PHRASES_PER_RESPONSE`，至多該上限，仍以**雅思／托福／學術／商用**取向排序，勿混 A2 幼稚搭配。
+- **難度篩選**：鎖定 **雅思、托福（含學術）、GRE、商用與正式學術寫作**常見之搭配；**排除 CEFR A2 及以下**過於日常的片語（例：*tell a story*、*have breakfast*、*go to school* 等純基礎用法），除非文本語境顯然為高階語域且不屬此類——否則 **`NO_WORTHY_PHRASE`**。
+- **每筆**：至少 **`phrase`**、**`phrase_front`**（**建議**）、**`cloze_text`**（**後備**）、**`semantic_anchor_zh`**（**後備**）、**`sentence_zh`**、**`definition_zh`**、**`usage_note`**、**`register_zh`**（**選填**；**僅**在搭配**明顯以書面／學術／正式為主**時填寫一句，否則 `""`；程式以**同一段**併入 **Usage Note**）、**`synonyms`**（欄位定義同前條款）。
+- **程式**：由 **`phrase_front`** 剥離括號得到純英文句供驗證與 **`cloze_text`** 存檔；錨點優先取自 **`}}` 後括號**，否則取自 **`semantic_anchor_zh`**；無 **phrase_front** 時以英文 **`cloze_text` + `semantic_anchor_zh`** 組出正面。
+- **全拒絕**：`phrases: []` 或約定 **`{"error":"NO_WORTHY_PHRASE"}`**，程式不存檔。
+- **長文**：只選**單一**最優先搭配；單次產出上限（預設 **1**，`MAX_PHRASES_PER_RESPONSE`）。
+- **截圖僅單字／無整句**：允許模型**自造一句**自然學術英文作為 Context，並嵌入該搭配後再做 Cloze；仍須忠於畫面可辨識之線索。
+
+### 本地歷史與封存（與單字分離）
+- **去重**：對 **`phrase`** 正規化（與單字類似：`strip`、小寫、空白折一）。
+- **歷史檔**：**`phrase_history/<PHRASE_DECK_SLUG>.json`**（與 **`word_history/`** 分開存放）。
+- **封存**：**`{PHRASE_ARCHIVE_BASE}/{PHRASE_DECK_SLUG}/`**；`PHRASE_ARCHIVE_BASE` 預設 **`vocabulary_phrases`**，可環境變數 **`PHRASE_ARCHIVE_DIR`** 覆寫基底。
+- **離線佇列**：片語截圖流程若 Gemini／Anki 失敗，截圖路徑寫入 **`pending_tasks_phrases.json`**（與單字 **`pending_tasks.json`** 分離）；啟動時獨立重試。
+
+### 已定案（使用者確認）
+1. **熱鍵**：維持預設 **`<ctrl>+v`** 作為片語反白觸發（使用者知情可能與貼上衝突）。
+2. **Anki**：標準 **`Cloze`**，正面 **`Text`**（**phrase_front** 或拼接結果，**置左**），背面 **`Back Extra`** HTML（**整句譯內文**→**分隔線**→Full Phrase…→Definition…）；欄位名可環境變數覆寫。
+3. **TTS**：片語卡**不加**音檔。
+
+### 驗收條件（草案）
+- **AC1**：片語卡只進 **`ANKI_PHRASE_DECK_NAME`**，不進單字牌組。
+- **AC2**：片語歷史檔 **`phrase_history/<slug>.json`** 與單字 **`word_history/<slug>.json`** 分檔；已收錄 **`phrase`** 不重複新增。
+- **AC3**：無合格片語時零寫入。
+- **AC4**：Anki 中 Cloze 正面可正常隱藏；**挖空後**緊接括號內之**短中文錨點**；背面含**整句中文譯文**及其餘區塊可讀。
+- **AC5**：預設同一輸入**至多一張**片語卡；若提高 `MAX_PHRASES_PER_RESPONSE`，至多該筆數且各自去重。
+
+---
+
 ## 環境配置 (`setup.sh`)
 - 自動建立 `.venv`。
 - 安裝 `requirements.txt`。
 - 建立 `captures/` 暫存目錄。
 - 建立 `vocabulary/`、`word_history/` 目錄（本地單字封存與去重歷史使用；執行時亦會依牌組自動建立子目錄／分檔）。
+- （片語功能）建立 **`phrase_history/`**、**`vocabulary_phrases/`**（執行時依片語牌組 slug 分檔／子路徑）。

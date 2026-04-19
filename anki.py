@@ -12,6 +12,10 @@ log = logging.getLogger(__name__)
 W2C_AUDIO_MARKER = "__W2C_AUDIO__"
 
 HR_BETWEEN_SENSES = '<hr style="border:none;border-top:1px solid #eee;margin:16px 0">'
+# 片語卡 Back Extra 最頂端分隔線
+PHRASE_BACK_TOP_RULE = (
+    '<hr style="border:none;border-top:1px solid #ccc;margin:0 0 16px 0">'
+)
 
 # 義項內「英文釋義」與「詞性＋中文釋義」兩行（較大）
 _FONT_DEF_PX = 22
@@ -308,3 +312,173 @@ def add_cards_to_anki_results(words: list[dict]) -> list[object]:
             )
 
         return _invoke("addNotes", notes=notes)
+
+
+_PHRASE_CLOZE_C1 = re.compile(r"\{\{c1::(.*?)}}", re.DOTALL)
+# 片語克漏字前面可選的半形括號中文錨點
+_PHRASE_ANCHOR_PARENS = re.compile(r"^(\s*\([^)]*\))?\s*")
+
+
+def underline_phrase_on_cloze_front(phrase_front: str, phrase: str) -> str:
+    """
+    在正面 Text 中，為慣用搭配中**可見**的英文部分加 <u>（克漏字內不處理）。
+    以 phrase 與 {{c1::blob}} 推導前綴（多為實詞）及可選後綴。
+    """
+    if not phrase_front or not phrase or "<u" in phrase_front.lower():
+        return phrase_front
+    m = _PHRASE_CLOZE_C1.search(phrase_front)
+    if not m:
+        return phrase_front
+    blob = m.group(1).strip()
+    pn = phrase.strip()
+    if not blob or not pn:
+        return phrase_front
+    pnl = pn.lower()
+    bll = blob.lower()
+    if bll not in pnl:
+        return phrase_front
+    cut = pnl.rfind(bll)
+    blob_seg = pn[cut : cut + len(blob)] if cut >= 0 else blob
+    prefix = pn[:cut].rstrip()
+    suffix = pn[cut + len(blob_seg) :].lstrip()
+
+    cloze_start = m.start()
+    cloze_end = m.end()
+    before = phrase_front[:cloze_start]
+    mid = phrase_front[cloze_start:cloze_end]
+    after = phrase_front[cloze_end:]
+
+    new_before = before
+    if prefix:
+        tail = before.rstrip()
+        pfx = prefix.strip()
+        if pfx and len(tail) >= len(pfx) and tail[-len(pfx) :].lower() == pfx.lower():
+            i = len(tail) - len(pfx)
+            new_before = tail[:i] + "<u>" + tail[i:] + "</u>" + before[len(tail) :]
+
+    new_after = after
+    if suffix:
+        su = suffix.strip()
+        m2 = _PHRASE_ANCHOR_PARENS.match(after)
+        off = m2.end() if m2 else 0
+        head = after[:off]
+        rest = after[off:]
+        rs = rest.lstrip()
+        ws = len(rest) - len(rs)
+        if (
+            su
+            and rs
+            and len(rs) >= len(su)
+            and rs[: len(su)].lower() == su.lower()
+        ):
+            w = ws + len(su)
+            new_after = head + rest[:ws] + "<u>" + rest[ws:w] + "</u>" + rest[w:]
+
+    return new_before + mid + new_after
+
+
+def wrap_phrase_front_left(front: str) -> str:
+    """Cloze 正面欄位整體置左（Anki 預設有時置中）。"""
+    t = (front or "").strip()
+    if not t:
+        return t
+    return f'<div style="text-align:left;line-height:1.55">{t}</div>'
+
+
+def format_phrase_front_text(cloze_text_en: str, semantic_anchor_zh: str) -> str:
+    """
+    Cloze 正面：在第一組 {{c1::…}} 結尾的 }} 之後接上「 (語意錨點) 」，再接後半英文。
+    cloze_text_en 須為僅英文（無句內中文括號）。
+    """
+    ct = (cloze_text_en or "").strip()
+    an = (semantic_anchor_zh or "").strip()
+    if not ct or not an:
+        return ct
+    idx = ct.find("}}")
+    if idx == -1:
+        return ct
+    pos = idx + 2
+    return ct[:pos] + f" ({an})" + ct[pos:]
+
+
+def _build_phrase_back_extra(p: dict) -> str:
+    fp = html.escape(str(p.get("phrase", "")).strip())
+    st = html.escape(str(p.get("sentence_zh", "")).strip())
+    dz = html.escape(str(p.get("definition_zh", "")).strip())
+    un = html.escape(str(p.get("usage_note", "")).strip())
+    rg = html.escape(str(p.get("register_zh", "")).strip())
+    sa = html.escape(str(p.get("semantic_anchor_zh", "")).strip())
+    usage_block = un
+    if rg:
+        if un:
+            tail = un.rstrip()
+            if tail and not tail.endswith(("。", "！", "？", "…", ".", "!", "?")):
+                usage_block += "。"
+            usage_block += rg
+        else:
+            usage_block = rg
+    syn_raw = p.get("synonyms")
+    if isinstance(syn_raw, list):
+        syn_line = ", ".join(html.escape(str(x).strip()) for x in syn_raw if str(x).strip())
+    else:
+        syn_line = html.escape(str(syn_raw or "").strip())
+    phrase_line = fp
+    if sa:
+        phrase_line += f' ({sa})'
+    title = (
+        '<div style="font-weight:600;margin-bottom:4px;line-height:1.4">Full Phrase</div>'
+        f'<div style="margin-bottom:4px">{phrase_line}</div>'
+    )
+    sentence_block = ""
+    if st:
+        sentence_block = f'<div style="margin-bottom:14px">{st}</div>'
+    rest_after_sentence = (
+        f"{PHRASE_BACK_TOP_RULE}"
+        f"{title}"
+        '<div style="margin-top:10px;font-weight:600;margin-bottom:4px">Definition</div>'
+        f"<div>{dz}</div>"
+        '<div style="margin-top:10px;font-weight:600;margin-bottom:4px">Usage Note</div>'
+        f"<div>{usage_block}</div>"
+        '<div style="margin-top:10px;font-weight:600;margin-bottom:4px">Synonyms</div>'
+        f"<div>{syn_line}</div>"
+    )
+    return (
+        f'<div style="font-size:{_FONT_BODY_PX}px;line-height:1.5;text-align:left">'
+        f"{sentence_block}"
+        f"{rest_after_sentence}"
+        "</div>"
+    )
+
+
+def add_phrases_to_anki_results(phrases: list[dict]) -> list[object]:
+    """片語 Cloze（無 TTS）。fields 須符合 Anki「Cloze」版型（預設 Text + Back Extra）。"""
+    ensure_deck_exists(config.ANKI_PHRASE_DECK_NAME)
+    tf = config.ANKI_PHRASE_FIELD_TEXT
+    xf = config.ANKI_PHRASE_FIELD_EXTRA
+    notes = []
+    for p in phrases:
+        front = str(p.get("phrase_front", "") or "").strip()
+        if not front:
+            ct = str(p.get("cloze_text", "") or "").strip()
+            if not ct:
+                raise ValueError("phrase 缺少 phrase_front 或 cloze_text")
+            front = format_phrase_front_text(
+                ct, str(p.get("semantic_anchor_zh", "") or "").strip()
+            )
+        front = underline_phrase_on_cloze_front(
+            front, str(p.get("phrase", "") or "").strip()
+        )
+        front = wrap_phrase_front_left(front)
+        notes.append(
+            {
+                "deckName": config.ANKI_PHRASE_DECK_NAME,
+                "modelName": config.ANKI_PHRASE_MODEL_NAME,
+                "fields": {
+                    tf: front,
+                    xf: _build_phrase_back_extra(p),
+                },
+                "options": {"allowDuplicate": False, "duplicateScope": "deck"},
+                "tags": ["word-to-card-phrase"],
+            }
+        )
+    return _invoke("addNotes", notes=notes)

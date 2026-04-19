@@ -20,10 +20,19 @@ import pyperclip
 
 import config
 import history_logger
+import phrase_archive
+import phrase_history
+import phrase_queue_manager
 import queue_manager
 import word_archive
-from anki import add_cards_to_anki_results
-from llm import analyze_image, analyze_text, get_effective_model_name
+from anki import add_cards_to_anki_results, add_phrases_to_anki_results
+from llm import (
+    analyze_image,
+    analyze_image_phrases,
+    analyze_text,
+    analyze_text_phrases,
+    get_effective_model_name,
+)
 from notify import notify, notify_success
 from screenshot import take_screenshot
 
@@ -34,6 +43,14 @@ def _record_added(words: list[dict]) -> None:
         return
     history_logger.record(words)
     word_archive.save(words)
+
+
+def _record_phrases_added(phrases: list[dict]) -> None:
+    """Anki 成功新增片語卡後：片語歷史 + 封存。"""
+    if not phrases:
+        return
+    phrase_history.record(phrases)
+    phrase_archive.save(phrases)
 
 
 # ── Logging 設定 ──────────────────────────────────────────
@@ -108,6 +125,31 @@ def _format_word_preview(words: list[dict], limit: int = 3) -> str:
     text = "、".join(p for p in previews if p)
     if len(words) > limit:
         text += f" … 共 {len(words)} 字"
+    return text
+
+
+def _phrase_names(phrases: list[dict]) -> str:
+    names = []
+    for p in phrases:
+        if isinstance(p, dict):
+            n = str(p.get("phrase", "")).strip()
+            if n:
+                names.append(n)
+    return ", ".join(names)
+
+
+def _format_phrase_preview(phrases: list[dict], limit: int = 4) -> str:
+    parts: list[str] = []
+    for p in phrases[:limit]:
+        ph = str(p.get("phrase", "")).strip()
+        zh = str(p.get("definition_zh", "")).strip()
+        if ph and zh:
+            parts.append(f"{ph} — {zh}")
+        elif ph:
+            parts.append(ph)
+    text = "、".join(parts)
+    if len(phrases) > limit:
+        text += f" … 共 {len(phrases)} 筆"
     return text
 
 
@@ -278,6 +320,128 @@ def process_screenshot() -> None:
         notify_success(f"已新增 {added} 張卡片", word_preview or "（無預覽文字）")
 
 
+def process_screenshot_phrase() -> None:
+    """截圖 → Gemini 片語 Cloze → 片語歷史 → Anki 片語牌組。"""
+    log.info("── 開始片語截圖流程 ───────────────────────")
+    notify("Word to Card 片語", "請框選含英文搭配或句子的區域")
+
+    image_path = take_screenshot()
+    if not image_path:
+        log.info("片語截圖取消")
+        return
+
+    log.info("片語截圖完成：%s", image_path)
+    notify("Word to Card 片語", "Gemini 解析片語中…")
+
+    log.info("送出片語截圖至 Gemini（模型：%s）", config.GEMINI_MODEL)
+    try:
+        phrases = analyze_image_phrases(image_path)
+    except Exception as e:
+        log.error("片語 Gemini 分析失敗：%s", e)
+        notify("片語分析失敗，已加入片語重試佇列", str(e))
+        phrase_queue_manager.enqueue(image_path)
+        return
+
+    if not phrases:
+        log.warning("片語：無合格搭配（或圖片不清晰）")
+        notify("未收錄片語", "未辨識到值得收錄的搭配")
+        os.unlink(image_path)
+        return
+
+    log.info("Gemini 片語 %d 筆：%s", len(phrases), _phrase_names(phrases))
+
+    new_phrases = phrase_history.filter_new(phrases)
+    skipped = len(phrases) - len(new_phrases)
+    if skipped:
+        log.info("片語過濾已收錄 %d 筆，剩餘 %d 筆", skipped, len(new_phrases))
+
+    if not new_phrases:
+        notify("片語皆已收錄", f"{skipped} 筆已在片語歷史中")
+        os.unlink(image_path)
+        return
+
+    log.info("寫入 Anki（片語牌組）：%s", _phrase_names(new_phrases))
+    try:
+        results = add_phrases_to_anki_results(new_phrases)
+    except Exception as e:
+        log.error("片語 Anki 寫入失敗：%s", e)
+        notify("片語 Anki 失敗，已加入片語重試佇列", str(e))
+        phrase_queue_manager.enqueue(image_path)
+        return
+
+    added_phrases = [p for p, r in zip(new_phrases, results) if r is not None]
+    _record_phrases_added(added_phrases)
+    os.unlink(image_path)
+
+    preview = _format_phrase_preview(added_phrases)
+    added = len(added_phrases)
+    log.info("片語完成：新增 %d 張（%s）", added, preview)
+    if skipped:
+        preview = (preview + f"（跳過歷史 {skipped}）") if preview else f"跳過歷史 {skipped}"
+    if added == 0:
+        notify(
+            "片語未新增",
+            (f"可能皆重複：{_phrase_names(new_phrases)}" if new_phrases else "Anki 未新增"),
+        )
+    else:
+        notify_success(f"已新增 {added} 張片語卡", preview or "（無預覽）")
+
+
+def process_selection_phrase() -> None:
+    """反白 → Cmd+C 讀取選取 → Gemini 片語 → Anki。"""
+    log.info("── 開始片語反白流程 ───────────────────────")
+    notify("Word to Card 片語", "請反白英文片語或段落，再按快捷鍵（預設 ⌃V）")
+
+    try:
+        previous, selected = _copy_selection_to_clipboard()
+    except Exception as e:
+        log.error("片語：無法讀取剪貼簿：%s", e)
+        notify("取詞失敗", "請到 系統設定→隱私權與安全性→輔助使用 開啟權限")
+        return
+
+    try:
+        text = (selected or "").strip()
+        if not text:
+            log.info("片語：剪貼簿為空")
+            notify("未取得文字", "請反白英文內容後再試")
+            return
+
+        notify("Word to Card 片語", "Gemini 解析片語中…")
+        log.info("送出片語剪貼簿文字至 Gemini（模型：%s）", config.GEMINI_MODEL)
+        phrases = analyze_text_phrases(text)
+        if not phrases:
+            log.info("片語：無合格搭配")
+            notify("未收錄片語", "未找到值得收錄的搭配")
+            return
+
+        new_phrases = phrase_history.filter_new(phrases)
+        skipped = len(phrases) - len(new_phrases)
+        if not new_phrases:
+            notify("片語已收錄", f"{skipped} 筆已在片語歷史中")
+            return
+
+        log.info("寫入 Anki（片語牌組）：%s", _phrase_names(new_phrases))
+        results = add_phrases_to_anki_results(new_phrases)
+        added_phrases = [p for p, r in zip(new_phrases, results) if r is not None]
+        _record_phrases_added(added_phrases)
+        added = len(added_phrases)
+        preview = _format_phrase_preview(added_phrases)
+
+        if added == 0:
+            notify("片語未新增", "Anki 可能皆為重複")
+        else:
+            notify_success(f"已新增 {added} 張片語卡", preview or "（無預覽）")
+        log.info("片語完成：新增 %d 張（%s）", added, preview)
+    except Exception as e:
+        log.error("片語反白流程失敗：%s", e)
+        notify("片語流程失敗", str(e))
+    finally:
+        try:
+            pyperclip.copy(previous)
+        except Exception:
+            pass
+
+
 def retry_queue() -> None:
     """啟動時重試離線佇列。"""
     count = queue_manager.pending_count()
@@ -292,6 +456,19 @@ def retry_queue() -> None:
     log.info("佇列：重試完成 %d/%d 成功", done, count)
 
 
+def retry_queue_phrase() -> None:
+    count = phrase_queue_manager.pending_count()
+    if count == 0:
+        return
+    log.info("片語佇列：發現 %d 個待重試任務…", count)
+    done = phrase_queue_manager.process_queue(
+        analyze_fn=analyze_image_phrases,
+        add_cards_fn=add_phrases_to_anki_results,
+        record_fn=_record_phrases_added,
+    )
+    log.info("片語佇列：重試完成 %d/%d", done, count)
+
+
 def on_activate() -> None:
     thread = threading.Thread(target=process_screenshot, daemon=True)
     thread.start()
@@ -299,6 +476,16 @@ def on_activate() -> None:
 
 def on_activate_selection() -> None:
     thread = threading.Thread(target=process_selection, daemon=True)
+    thread.start()
+
+
+def on_activate_screenshot_phrase() -> None:
+    thread = threading.Thread(target=process_screenshot_phrase, daemon=True)
+    thread.start()
+
+
+def on_activate_phrase_selection() -> None:
+    thread = threading.Thread(target=process_selection_phrase, daemon=True)
     thread.start()
 
 
@@ -316,6 +503,23 @@ def _build_hotkey_handlers() -> list[keyboard.HotKey]:
             handlers.append(keyboard.HotKey(keyboard.HotKey.parse(hotkey), on_activate_selection))
         except Exception as e:
             log.error("反白取詞熱鍵格式錯誤：%s (%s)", hotkey, e)
+
+    try:
+        handlers.append(
+            keyboard.HotKey(
+                keyboard.HotKey.parse(config.HOTKEY_SCREENSHOT_PHRASE),
+                on_activate_screenshot_phrase,
+            )
+        )
+    except Exception as e:
+        log.error("片語截圖熱鍵格式錯誤：%s (%s)", config.HOTKEY_SCREENSHOT_PHRASE, e)
+
+    phrase_hotkeys = [h.strip() for h in config.HOTKEY_PHRASE_SELECTIONS.split(",") if h.strip()]
+    for hotkey in phrase_hotkeys:
+        try:
+            handlers.append(keyboard.HotKey(keyboard.HotKey.parse(hotkey), on_activate_phrase_selection))
+        except Exception as e:
+            log.error("片語反白熱鍵格式錯誤：%s (%s)", hotkey, e)
 
     return handlers
 
@@ -361,26 +565,39 @@ def main() -> None:
 
     # 啟動時先重試離線佇列
     retry_queue()
+    retry_queue_phrase()
 
     log.info("=== Word to Card 已啟動 ===")
     log.info("快捷鍵（截圖）：%s", config.HOTKEY_SCREENSHOT_DISPLAY)
+    log.info("快捷鍵（截圖—片語）：%s", config.HOTKEY_SCREENSHOT_PHRASE_DISPLAY)
     log.info("快捷鍵（反白取詞）：%s", config.HOTKEY_SELECTIONS_DISPLAY)
+    log.info("快捷鍵（反白—片語）：%s", config.HOTKEY_PHRASE_SELECTIONS_DISPLAY)
     try:
         log.info("模型：%s（env=%s）", get_effective_model_name(), config.GEMINI_MODEL)
     except Exception:
         log.info("模型：%s", config.GEMINI_MODEL)
-    log.info("Anki 牌組：%s", config.ANKI_DECK_NAME)
+    log.info("Anki 牌組（單字）：%s", config.ANKI_DECK_NAME)
+    log.info("Anki 牌組（片語 Cloze）：%s", config.ANKI_PHRASE_DECK_NAME)
     log.info(
-        "牌組目錄 slug：%s（單字庫：%s；歷史：%s）",
+        "單字 slug：%s（庫：%s；歷史：%s）",
         config.DECK_SLUG,
         config.WORD_ARCHIVE_DIR,
         config.HISTORY_FILE,
+    )
+    log.info(
+        "片語 slug：%s（庫：%s；歷史：%s；佇列檔：%s）",
+        config.PHRASE_DECK_SLUG,
+        config.PHRASE_ARCHIVE_DIR,
+        config.PHRASE_HISTORY_FILE,
+        config.QUEUE_FILE_PHRASE,
     )
     log.info("Log 檔案：%s", _LOG_FILE)
     log.info("按下 Ctrl+C 停止")
 
     selection_hotkeys = [h.strip() for h in config.HOTKEY_SELECTIONS.split(",") if h.strip()]
     log.info("已註冊反白取詞熱鍵：%s", ", ".join(selection_hotkeys))
+    phrase_sel = [h.strip() for h in config.HOTKEY_PHRASE_SELECTIONS.split(",") if h.strip()]
+    log.info("已註冊片語反白熱鍵：%s", ", ".join(phrase_sel))
     hotkeys = _build_hotkey_handlers()
     _run_hotkey_listener(hotkeys)
 

@@ -6,11 +6,13 @@ Gemini Vision 模組（google-genai 新版 SDK）
 import json
 import logging
 import pathlib
+import re
 
 from google import genai
 from google.genai import types
 
 import config
+import history_logger
 
 _client = genai.Client(api_key=config.GEMINI_API_KEY)
 _resolved_model: str | None = None
@@ -432,3 +434,322 @@ def analyze_text(text_input: str) -> list[dict]:
             raise last_err
 
     return _decode_words_response(response, error_key="NOT_A_WORD", context="text")
+
+
+# ── 片語 Cloze（Vision / Text）────────────────────────────────
+
+
+def _phrase_image_prompt() -> str:
+    mx = config.MAX_PHRASES_PER_RESPONSE
+    return f"""你是一位專業英文老師，協助 **雅思／托福（含學術）、GRE、商用英文與正式學術寫作**的考生記「高訊號慣用搭配」。
+
+請分析截圖中的英文內容。**只鎖定最值得一張卡的那一個搭配**——對應考試／論文／商務語域最重要者；**勿**並列多個次要候選。優先選 **雅思／托福愛考、商務與學術文本常見**的結構（如 due to N., attribute A to B, consistent with, in line with），排除泛用文法骨架。
+
+**難度門檻**：排除 **CEFR A2 及以下**過於日常的片語（例如 *tell a story*、*have breakfast*、*go to school*、*thank you very much* 等純基礎／教材初級用法）。若畫面只有此類搭配、或無更高價值選項，請僅回傳：{{"error":"NO_WORTHY_PHRASE"}}。
+
+若圖片模糊、無英文、或無法辨識，請僅回傳：{{"error":"IMAGE_UNCLEAR"}}
+
+若畫面無完整句子：請仍盡量辨識搭配或關鍵詞，並**自行撰寫一句自然、學術語氣的英文**，把**那一個**搭配嵌入句中；**不可憑空捏造不存在於畫面線索的搭配**。
+
+若完全沒有可收錄的高訊號搭配，請僅回傳：{{"error":"NO_WORTHY_PHRASE"}}
+
+否則回傳嚴格 JSON（不要 markdown）：
+{{
+  "phrases": [
+    {{
+      "phrase": "canonical 片語字串（供去重），如 consistent with",
+      "phrase_front": "The findings are consistent {{{{c1::with}}}} (與⋯一致／相符) prior research.",
+      "sentence_zh": "這些發現與先前的研究一致。",
+      "definition_zh": "簡短中文釋義",
+      "usage_note": "介係詞、及物性、常見錯誤等（一句）",
+      "register_zh": "偏向書面、學術／正式寫作常見",
+      "synonyms": ["英文近義片語，0～4 個；無則 []"]
+    }}
+  ]
+}}
+
+筆數與取捨：
+- **`phrases`**：有合格搭配時，**至多 {mx}** 筆；**預設情境下應只有 1 筆**，且為**全文／全圖中你最推薦背誦的那一個**；長文也只挑**單一**龍頭搭配，**禁止**為了湊筆數加入 A2 級片語。
+- 若上限 **{mx}** 大於 1：僅在仍屬 **B1+** 且具考試／學術／商用價值時才可列第二筆以後，**嚴禁**混入幼稚搭配。
+
+規則（版面）：
+- **phrase_front**（建議必填）：**卡片正面完整一行**，請**與語意錨點一起想好再輸出**：僅英文 + **恰好一組** **`{{{{c1::…}}}}`** + **緊接**半形空格 + **`(語意錨點)`**（極短中文，約 2～12 字；**非**整句譯）。錨點必須緊貼在第一組 **`}}`** 之後，例如：`rooted {{{{c1::in}}}} (紮根於) traditional`。挖空範圍仍僅 **介系詞／冠詞／不定詞 to／小品詞**；**禁止**把 **`phrase` 整串**塞進同一 Cloze。
+- **後備**（若不便使用 phrase_front）：改填 **`cloze_text`**（僅英文，無括號）+ **`semantic_anchor_zh`**，程式會自動拼接正面。
+- **sentence_zh**（必填）：整句中文翻譯——對應 **`phrase_front`**（或後備 **`cloze_text`**）那句英文；**勿**與 **definition_zh** 混用。
+- **register_zh**（選填）：**僅當**此搭配**明顯以書面／學術／正式寫作為主**（論文、報告、書函；口語較少這樣說）時，才用**一句極短中文**提醒「偏向書面／正式語域」。**若不偏書面**（口語也常見、口語書面皆可且無特別正式感），務必填 **`""`**，勿在此重複 Usage。
+- **phrase**：完整慣用搭配（去重）；**`{{{{c1::…}}}}` 內答案**須為 **`phrase` 的真子字串**。
+只回傳 JSON。"""
+
+
+def _phrase_text_prompt() -> str:
+    mx = config.MAX_PHRASES_PER_RESPONSE
+    return f"""你是一位專業英文老師，協助 **雅思／托福（含學術）、GRE、商用英文與正式學術寫作**的考生記「高訊號慣用搭配」。
+
+使用者貼上的可能是：單一片語、搭配說明、一句或多句英文。請只挑出**你認為最值得做成一張卡的那一個搭配**——**雅思托福最常考、商務／學術語域最有用**的那一個；長篇也只選**單一**龍頭搭配。
+
+**難度門檻**：排除 **CEFR A2 及以下**過於日常的片語（例如 *tell a story*、*have breakfast*、*nice to meet you* 等）。若全文僅有此類用法或無合格項，請僅回傳：{{"error":"NO_WORTHY_PHRASE"}}
+
+若輸入無英文，請僅回傳：{{"error":"NO_WORTHY_PHRASE"}}
+
+否則回傳嚴格 JSON（不要 markdown）：
+{{
+  "phrases": [
+    {{
+      "phrase": "canonical 片語字串",
+      "phrase_front": "… consistent {{{{c1::with}}}} (與⋯一致) …",
+      "sentence_zh": "……與先前研究一致。",
+      "definition_zh": "簡短中文釋義",
+      "usage_note": "一句用法提示",
+      "register_zh": "",
+      "synonyms": []
+    }}
+  ]
+}}
+
+筆數：
+- **`phrases`**：至多 **{mx}** 筆；預設應**只有 1 筆**且為最優先搭配；**禁止**用幼稚片語湊數。
+
+規則（版面）：
+- **phrase_front**：見截圖版（建議：一次寫好英文句 + Cloze + **`}}` 後 `(語意錨點)`**）。
+- **後備**：**`cloze_text`**（僅英文）+ **`semantic_anchor_zh`**。
+- **sentence_zh**（必填）：見截圖版。
+- **register_zh**：見截圖版（**僅偏書面時**填；否則 `""`）。
+- **phrase**：完整搭配（去重用）；**`{{{{c1::…}}}}` 內答案**須為 **`phrase` 的連續子字串**。
+- 若貼上無完整句，請**自造一句**自然學術英文，嵌入該搭配後再做 Cloze。
+只回傳 JSON。"""
+
+
+_C1_PATTERN = re.compile(r"\{\{c1::(.*?)}}")
+# 模型若把錨點寫進句內：`}} (紮根於)` — 正規化時剥離，改以 semantic_anchor_zh 統一組版
+_CLOZE_INLINE_ANCHOR = re.compile(r"(\{\{c1::[^}]+\}\})\s*\([^)]*\)")
+_MAX_SEMANTIC_ANCHOR_LEN = 32
+_MAX_SENTENCE_ZH_LEN = 800
+_MAX_REGISTER_ZH_LEN = 120
+
+
+def _phrase_json_ok(cloze_text: str) -> bool:
+    return "{{c1::" in cloze_text and "}}" in cloze_text
+
+
+def _phrase_cloze_answer_blob(cloze_text: str) -> str | None:
+    m = _C1_PATTERN.search(cloze_text)
+    return m.group(1).strip() if m else None
+
+
+def _cloze_english_strip_inline_anchor(cloze_text: str) -> str:
+    """移除第一組 {{c1::}} 後若緊接 (中文)，剝離括號（供驗證／存檔用純英文句）。"""
+    return _CLOZE_INLINE_ANCHOR.sub(r"\1", cloze_text, count=1).strip()
+
+
+def _cloze_extract_inline_anchor_zh(cloze_text: str) -> str | None:
+    m = re.search(r"\{\{c1::[^}]+\}\}\s*\(([^)]+)\)", cloze_text)
+    return m.group(1).strip() if m else None
+
+
+def _format_phrase_front_fallback(cloze_en: str, semantic_anchor_zh: str) -> str:
+    """與 anki.format_phrase_front_text 一致；避免 llm 匯入 anki 造成循環依賴。"""
+    ct = (cloze_en or "").strip()
+    an = (semantic_anchor_zh or "").strip()
+    if not ct or not an:
+        return ct
+    idx = ct.find("}}")
+    if idx == -1:
+        return ct
+    pos = idx + 2
+    return ct[:pos] + f" ({an})" + ct[pos:]
+
+
+def _phrase_cloze_semantic_ok(phrase: str, cloze_text: str) -> bool:
+    """
+    Cloze 答案須為完整 phrase 的連續片段；多字搭配時不得把整組 phrase 當唯一答案。
+    """
+    blob = _phrase_cloze_answer_blob(cloze_text)
+    if not blob:
+        return False
+    pn = history_logger.normalize_word(phrase)
+    bn = history_logger.normalize_word(blob)
+    if not pn or not bn:
+        return False
+    if bn not in pn:
+        return False
+    if " " in pn and bn == pn:
+        return False
+    return True
+
+
+def _normalize_phrase_entry(raw: dict) -> dict | None:
+    if not isinstance(raw, dict):
+        return None
+    phrase = str(raw.get("phrase", "")).strip()
+    phrase_front_in = str(raw.get("phrase_front", "")).strip()
+    cloze_only = str(raw.get("cloze_text", "")).strip()
+
+    if phrase_front_in:
+        cloze_raw = phrase_front_in
+    elif cloze_only:
+        cloze_raw = cloze_only
+    else:
+        return None
+
+    cloze_en = _cloze_english_strip_inline_anchor(cloze_raw)
+    anchor = str(raw.get("semantic_anchor_zh", "")).strip() or (
+        _cloze_extract_inline_anchor_zh(cloze_raw) or ""
+    )
+    if not anchor or len(anchor) > _MAX_SEMANTIC_ANCHOR_LEN:
+        return None
+    if (
+        not phrase
+        or not cloze_en
+        or not _phrase_json_ok(cloze_en)
+        or not _phrase_cloze_semantic_ok(phrase, cloze_en)
+    ):
+        return None
+    sentence_zh = str(raw.get("sentence_zh", "")).strip()
+    if not sentence_zh or len(sentence_zh) > _MAX_SENTENCE_ZH_LEN:
+        return None
+    dz = str(raw.get("definition_zh", "")).strip()
+    un = str(raw.get("usage_note", "")).strip()
+    syn_raw = raw.get("synonyms")
+    if isinstance(syn_raw, list):
+        synonyms = [str(x).strip() for x in syn_raw if str(x).strip()][:6]
+    else:
+        synonyms = [s.strip() for s in str(syn_raw or "").split(",") if s.strip()][:6]
+
+    phrase_front_out = phrase_front_in or _format_phrase_front_fallback(cloze_en, anchor)
+    reg = str(raw.get("register_zh", "") or "").strip()
+    if len(reg) > _MAX_REGISTER_ZH_LEN:
+        reg = reg[:_MAX_REGISTER_ZH_LEN]
+    return {
+        "phrase": phrase,
+        "phrase_front": phrase_front_out,
+        "cloze_text": cloze_en,
+        "semantic_anchor_zh": anchor,
+        "sentence_zh": sentence_zh,
+        "definition_zh": dz,
+        "usage_note": un,
+        "register_zh": reg,
+        "synonyms": synonyms,
+    }
+
+
+def _normalize_phrases_payload(parsed: object) -> list[dict]:
+    if isinstance(parsed, dict):
+        err = parsed.get("error")
+        if err in ("IMAGE_UNCLEAR", "NO_WORTHY_PHRASE"):
+            return []
+        raw_list = parsed.get("phrases")
+        if not isinstance(raw_list, list):
+            return []
+        out: list[dict] = []
+        for x in raw_list[: config.MAX_PHRASES_PER_RESPONSE]:
+            e = _normalize_phrase_entry(x) if isinstance(x, dict) else None
+            if e:
+                out.append(e)
+        return out
+    return []
+
+
+def _decode_phrases_response(response: object, *, context: str) -> list[dict]:
+    raw_text = str(getattr(response, "text", "") or "")
+    json_text = _extract_json_text(raw_text)
+    try:
+        parsed = json.loads(json_text)
+    except json.JSONDecodeError as exc:
+        log.error("Gemini %s 片語 JSON 解析失敗：%s", context, exc)
+        if raw_text.strip():
+            log.error("Gemini %s 原始回應：%s", context, _clip_for_log(raw_text))
+        raise
+    return _normalize_phrases_payload(parsed)
+
+
+def analyze_image_phrases(image_path: str) -> list[dict]:
+    """截圖 → 片語 Cloze 結構清單（0～N 筆）。"""
+    image_bytes = pathlib.Path(image_path).read_bytes()
+    prompt = _phrase_image_prompt()
+    global _resolved_model
+    model_name = get_effective_model_name()
+    try:
+        response = _client.models.generate_content(
+            model=model_name,
+            contents=[
+                types.Part.from_bytes(data=image_bytes, mime_type="image/png"),
+                types.Part.from_text(text=prompt),
+            ],
+        )
+    except Exception as e:
+        if not _model_error_allows_fallback(e):
+            raise
+        preferred = _normalize_model_name(config.GEMINI_MODEL) or config.GEMINI_MODEL
+        fallback_candidates = [
+            "models/gemini-2.5-flash",
+            "models/gemini-2.5-flash-lite",
+            "models/gemini-2.5-pro",
+            "models/gemini-2.0-flash",
+            "models/gemini-2.0-flash-lite",
+            "models/gemini-1.5-flash",
+            "models/gemini-1.5-pro",
+        ]
+        last_err: Exception = e
+        for candidate in fallback_candidates:
+            if candidate == preferred:
+                continue
+            try:
+                _resolved_model = candidate
+                print(f"[Gemini] 模型不可用，已自動改用：{preferred} -> {candidate}")
+                response = _client.models.generate_content(
+                    model=candidate,
+                    contents=[
+                        types.Part.from_bytes(data=image_bytes, mime_type="image/png"),
+                        types.Part.from_text(text=prompt),
+                    ],
+                )
+                break
+            except Exception as e2:
+                last_err = e2
+        else:
+            raise last_err
+    return _decode_phrases_response(response, context="phrase-image")
+
+
+def analyze_text_phrases(text_input: str) -> list[dict]:
+    """剪貼簿文字 → 片語 Cloze 結構清單。"""
+    prompt = _phrase_text_prompt()
+    global _resolved_model
+    model_name = get_effective_model_name()
+    try:
+        response = _client.models.generate_content(
+            model=model_name,
+            contents=[
+                types.Part.from_text(text=prompt),
+                types.Part.from_text(text=f"Clipboard text:\n{text_input}"),
+            ],
+        )
+    except Exception as e:
+        if not _model_error_allows_fallback(e):
+            raise
+        preferred = _normalize_model_name(config.GEMINI_MODEL) or config.GEMINI_MODEL
+        fallback_candidates = [
+            "models/gemini-2.5-flash",
+            "models/gemini-2.5-flash-lite",
+            "models/gemini-2.5-pro",
+        ]
+        last_err: Exception = e
+        for candidate in fallback_candidates:
+            if candidate == preferred:
+                continue
+            try:
+                _resolved_model = candidate
+                print(f"[Gemini] 模型不可用，已自動改用：{preferred} -> {candidate}")
+                response = _client.models.generate_content(
+                    model=candidate,
+                    contents=[
+                        types.Part.from_text(text=prompt),
+                        types.Part.from_text(text=f"Clipboard text:\n{text_input}"),
+                    ],
+                )
+                break
+            except Exception as e2:
+                last_err = e2
+        else:
+            raise last_err
+    return _decode_phrases_response(response, context="phrase-text")
