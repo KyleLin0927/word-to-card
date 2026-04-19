@@ -22,14 +22,20 @@ def normalize_word(word: str) -> str:
 
 
 def _load() -> set[str]:
-    if not os.path.exists(config.HISTORY_FILE):
-        return set()
-    with open(config.HISTORY_FILE, "r", encoding="utf-8") as f:
-        return set(json.load(f))
+    if os.path.isfile(config.HISTORY_FILE):
+        with open(config.HISTORY_FILE, "r", encoding="utf-8") as f:
+            return set(json.load(f))
+    legacy = getattr(config, "HISTORY_LEGACY_FILE", "")
+    if legacy and os.path.isfile(legacy):
+        with open(legacy, "r", encoding="utf-8") as f:
+            return set(json.load(f))
+    return set()
 
 
 def _save(history: set[str]) -> None:
-    with open(config.HISTORY_FILE, "w", encoding="utf-8") as f:
+    hist_path = config.HISTORY_FILE
+    os.makedirs(os.path.dirname(hist_path), exist_ok=True)
+    with open(hist_path, "w", encoding="utf-8") as f:
         json.dump(sorted(history), f, ensure_ascii=False, indent=2)
 
 

@@ -4,5 +4,6 @@ captures/
 vocabulary/
 word_to_card.log
 word_history.json
+word_history/
 .DS_Store
 __pycache__/

@@ -370,6 +370,12 @@ def main() -> None:
     except Exception:
         log.info("模型：%s", config.GEMINI_MODEL)
     log.info("Anki 牌組：%s", config.ANKI_DECK_NAME)
+    log.info(
+        "牌組目錄 slug：%s（單字庫：%s；歷史：%s）",
+        config.DECK_SLUG,
+        config.WORD_ARCHIVE_DIR,
+        config.HISTORY_FILE,
+    )
     log.info("Log 檔案：%s", _LOG_FILE)
     log.info("按下 Ctrl+C 停止")
 

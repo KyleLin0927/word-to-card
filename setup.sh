@@ -15,9 +15,9 @@ pip install -q --upgrade pip
 pip install -q -r requirements.txt
 echo "✓ 安裝套件完成"
 
-# 3. 建立 captures/、vocabulary/ 目錄
-mkdir -p captures vocabulary
-echo "✓ 建立 captures/、vocabulary/ 目錄"
+# 3. 建立 captures/、vocabulary/、word_history/ 目錄
+mkdir -p captures vocabulary word_history
+echo "✓ 建立 captures/、vocabulary/、word_history/ 目錄"
 
 # 4. 建立 .env（若不存在）
 if [ ! -f ".env" ]; then

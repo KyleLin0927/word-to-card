@@ -19,6 +19,7 @@ macOS 全域工具：
 ## 核心檔案結構與功能
 1. **`config.py`**: 
    - 讀取 `.env` 中的 `GEMINI_API_KEY`。
+   - 依 **`ANKI_DECK_NAME`** 計算 **`DECK_SLUG`**（Anki 階層 `::` 轉為 `__`，檔名不安全字元替換），供 **`vocabulary/<slug>/`** 與 **`word_history/<slug>.json`** 使用。
    - 設定 Anki 牌組名稱與模型名稱（預設 `Basic`，可透過 `.env` 的 `ANKI_MODEL_NAME` 覆寫）。
 2. **`notify.py`**: 
    - 封裝 `osascript` 提供系統彈窗通知。
@@ -28,7 +29,7 @@ macOS 全域工具：
    - 離線任務佇列：若 Gemini 或 Anki 連線失敗，將請求參數存入 `pending_tasks.json`。
    - 提供 `process_queue()` 於網路恢復時重試。
 4. **`history_logger.py`**: 
-   - 記錄已成功的單字卡，防止重複建立。
+   - 記錄已成功的單字卡，防止重複建立；歷史檔依**當前牌組 slug** 分檔（見「單字去重」）；可讀取舊版根目錄 `word_history.json` 相容。
 5. **`word_archive.py`**:
    - 在 Anki **實際成功新增**的單字上，將 Gemini 產生的精簡單字 JSON（含選填 `roots_memory`）另存至本地目錄（與 Anki 牌組並行，供使用者自行備份或版本管理）。
 6. **`main.py`**:
@@ -107,6 +108,10 @@ macOS 全域工具：
 - **AC2**：若 Gemini 回傳格式錯誤導致 JSONDecodeError，`word_to_card.log` 可看到該次回應的原始文字內容（至少包含錯誤附近片段）。
 
 ## 需求：單字去重（本地歷史 / 同批 / 佇列重試）
+- **歷史檔與牌組對應**：
+  - **分檔**：本地去重儲存於 **`word_history/<DECK_SLUG>.json`**（與 `ANKI_DECK_NAME` 對應；`DECK_SLUG` 由程式自牌組名稱正規化，`::` 階層化為 `__`）。
+  - **相容**：若該檔尚不存在，首次載入時仍會讀取舊版專案根目錄 **`word_history.json`**（僅讀取）；程式**首次寫入**歷史時會建立 `word_history/` 並寫入分檔，之後以分檔為準。
+  - **多牌組**：更改 `.env` 的 **`ANKI_DECK_NAME`** 即改用另一 slug，各牌組歷史**互相獨立**。
 - **正規化規則**：去重比對時需對 `word` 做正規化（`strip` 去除前後空白、`lower` 忽略大小寫，並將連續空白視為同一個空白）。
 - **同批去重**：Gemini 若在同一次回傳中給了重複的 `word`，只保留第一筆，其餘忽略。
 - **歷史去重**：所有要送進 Anki 的單字（包含快捷鍵即時流程與佇列重試流程）都必須先經過歷史過濾，避免重複新增。
@@ -256,14 +261,14 @@ macOS 全域工具：
 
 ### 行為
 - **觸發時機**：僅在 AnkiConnect **確認新增成功**的單字上執行（與 `history_logger.record` 使用同一批 `added_words`）；若該批全部為 duplicate（無成功筆數），則不寫入本地檔案。
-- **儲存位置**：預設為專案根目錄下的 `vocabulary/`；可透過環境變數 `WORD_ARCHIVE_DIR` 覆寫（相對路徑則相對於專案根目錄）。
+- **儲存位置**：預設**基底**為專案根目錄下的 `vocabulary/`；可透過環境變數 **`WORD_ARCHIVE_DIR`** 覆寫基底（相對路徑則相對於專案根目錄）。實際寫入目錄為 **`{基底}/{DECK_SLUG}/`**，與 **`ANKI_DECK_NAME`**（經 slug）對應，方便多牌組分類。
 - **停用**：可透過 `WORD_ARCHIVE_ENABLED=false`（或 `0`）關閉此功能。
 - **檔案格式**：每個單字一個 `*.json` 檔；**僅**寫入 `word`、`phonetic`、`difficulty`、選填 **`roots_memory`**（可為 `""`）、`senses` 與 **`archived_at`**（ISO 8601 UTC）。**不**寫入與 `senses[0]` 重複的根層鏡像（如 `part_of_speech`、`definition_zh`、`other_senses` 等）；執行流程記憶體內仍可保留鏡像供 Anki／通知使用。
 - **檔名規則**：以與歷史去重相同的 **`word` 正規化**（小寫、空白正規化）產生安全檔名；同一單字再次成功存檔時**覆寫**同一檔案（以最新內容為準）。
 - **錯誤隔離**：若目錄無法建立或單檔寫入失敗，不應影響 Anki 寫入與歷史紀錄；僅記錄 log 警告。
 
 ### 驗收條件
-- **AC1**：成功新增至少一張 Anki 卡片後，專案預設的 `vocabulary/` 下可看到對應的 `.json` 檔，且內容含 `word`、`senses` 與 `archived_at`（精簡格式，無根層鏡像重複欄位）；若有字根／記憶欄位則含 `roots_memory`。
+- **AC1**：成功新增至少一張 Anki 卡片後，於 **`vocabulary/<DECK_SLUG>/`**（或自訂基底路徑下同樣結構）可看到對應的 `.json` 檔，且內容含 `word`、`senses` 與 `archived_at`（精簡格式，無根層鏡像重複欄位）；若有字根／記憶欄位則含 `roots_memory`。
 - **AC2**：`WORD_ARCHIVE_ENABLED=false` 時，不建立或更新 `vocabulary/`（或指定目錄）中的檔案。
 - **AC3**：佇列重試成功新增時，行為與即時流程一致（成功筆數仍會寫入本地）。
 
@@ -271,4 +276,4 @@ macOS 全域工具：
 - 自動建立 `.venv`。
 - 安裝 `requirements.txt`。
 - 建立 `captures/` 暫存目錄。
-- 建立 `vocabulary/` 目錄（供本地單字 JSON 使用；若停用封存功能可為空目錄）。
+- 建立 `vocabulary/`、`word_history/` 目錄（本地單字封存與去重歷史使用；執行時亦會依牌組自動建立子目錄／分檔）。
