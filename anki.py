@@ -15,7 +15,7 @@ HR_BETWEEN_SENSES = '<hr style="border:none;border-top:1px solid #eee;margin:16p
 
 # 義項內「英文釋義」與「詞性＋中文釋義」兩行（較大）
 _FONT_DEF_PX = 22
-# Synonyms／Usage／Examples、Front 音標／難度等其餘內文
+# 次要內文 px：Synonyms、Usage、Examples、字根／記憶（roots_memory）、Front 音標／難度等（與 _FONT_DEF_PX 對照）
 _FONT_BODY_PX = 18
 # Front 單字（大標）
 _FONT_WORD_PX = 32
@@ -121,6 +121,19 @@ def _senses_for_card(word: dict) -> list[dict]:
     ]
 
 
+def _build_roots_memory_block(word: dict) -> str:
+    text = str(word.get("roots_memory", "") or "").strip()
+    if not text:
+        return ""
+    body = html.escape(text).replace("\n", "<br>")
+    return (
+        f'<div style="font-size:{_FONT_BODY_PX}px;line-height:1.5;text-align:left;margin-bottom:14px">'
+        '<div style="font-weight:600;margin-bottom:6px">字根／記憶</div>'
+        f'<div>{body}</div>'
+        "</div>"
+    )
+
+
 def _build_synonyms_line(sense: dict) -> str:
     raw = sense.get("synonyms")
     items: list[str] = []
@@ -201,10 +214,17 @@ def _build_front(word: dict) -> str:
 
 
 def _build_back(word: dict) -> str:
+    roots = _build_roots_memory_block(word)
     senses = _senses_for_card(word)
     if not senses:
+        if roots:
+            return roots
         return f'<div style="font-size:{_FONT_BODY_PX}px;line-height:1.5;text-align:left">(no definitions)</div>'
-    chunks: list[str] = [f'<div style="text-align:left">{_build_one_sense_inner(senses[0])}</div>']
+    chunks: list[str] = []
+    if roots:
+        chunks.append(roots)
+        chunks.append(HR_BETWEEN_SENSES)
+    chunks.append(f'<div style="text-align:left">{_build_one_sense_inner(senses[0])}</div>')
     if len(senses) == 1:
         return "".join(chunks)
     chunks.append(HR_BETWEEN_SENSES)

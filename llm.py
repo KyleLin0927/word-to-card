@@ -27,6 +27,7 @@ PROMPT = """你是一位專業英文老師，專門協助學生準備 GRE / TOEF
 - "word": 單字原形（字串）
 - "phonetic": IPA 發音（字串）
 - "difficulty": "GRE"、"TOEFL" 或 "Academic"（字串；整張卡共用）
+- "roots_memory": （選填，字串）**整張卡一筆**，置於卡片層級、與多義項無關。可寫**字首／字根／字尾**簡短拆解 + 一段中文**記憶點**或場景聯想（可換行，純文字）。若**無明確拆解**、或**硬拆反而誤導**則必須 `""`。**不要** HTML 或 markdown。
 - "senses": **陣列（至少 1 筆、至多 4 筆）**，每一筆代表一個**可獨立學習**的義項／常用詞性用法：
   - "part_of_speech": 非動詞如 noun / adjective / proper noun（字串）。**動詞**（含 phrasal verb）**必須**標及物性，**不得**只寫 verb：格式為 "verb (vt)"、"verb (vi)" 或 "verb (vi/vt)"（兼及物與不及物時；括號內全小寫）。片語動詞為 "phrasal verb (vt)"、"phrasal verb (vi)"、"phrasal verb (vi/vt)"（擇一）
   - "definition": 英文定義，簡潔明確（字串）
@@ -53,6 +54,7 @@ TEXT_PROMPT = """你是一位專業英文老師，專門協助學生準備 GRE /
 - "word": 單字原形（字串）
 - "phonetic": IPA 發音（字串）
 - "difficulty": "GRE"、"TOEFL" 或 "Academic"（字串；整張卡共用）
+- "roots_memory": （選填，字串）**整張卡一筆**。規則同 Vision：**字根／記憶輔助**純文字；無則 `""`。**不要** HTML 或 markdown。
 - "senses": **陣列（至少 1 筆、至多 4 筆）**，每一筆代表一個**可獨立學習**的義項／常用詞性用法：
   - "part_of_speech"、 "definition"、 "definition_zh"（中文釋義；必要時句末可括註書面／口語／正式與否等，例如「（口語常用）」）。**動詞**（含 phrasal verb）之 part_of_speech 規則同 Vision：**verb (vt)** / **verb (vi)** / **verb (vi/vt)**，片語則 **phrasal verb (vt|vi|vi/vt)**，**不可**僅輸出 "verb"
   - "synonyms": 0～3（無則 []）
@@ -212,6 +214,14 @@ def _normalize_senses(word_item: dict) -> None:
     _sync_root_from_first_sense(word_item)
 
 
+def _normalize_roots_memory(word_item: dict) -> None:
+    raw = word_item.get("roots_memory")
+    if isinstance(raw, str):
+        word_item["roots_memory"] = raw.strip()
+    else:
+        word_item["roots_memory"] = ""
+
+
 def _normalize_words_payload(parsed: object, *, error_key: str) -> list[dict]:
     """
     將模型輸出正規化為 list[dict]，並只保留含有效 word 的項目。
@@ -237,6 +247,7 @@ def _normalize_words_payload(parsed: object, *, error_key: str) -> list[dict]:
         word = item.get("word")
         if isinstance(word, str) and word.strip():
             _normalize_senses(item)
+            _normalize_roots_memory(item)
             normalized.append(item)
     return normalized
 

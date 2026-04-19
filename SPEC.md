@@ -30,7 +30,7 @@ macOS 全域工具：
 4. **`history_logger.py`**: 
    - 記錄已成功的單字卡，防止重複建立。
 5. **`word_archive.py`**:
-   - 在 Anki **實際成功新增**的單字上，將 Gemini 產生的完整單字 JSON 另存至本地目錄（與 Anki 牌組並行，供使用者自行備份或版本管理）。
+   - 在 Anki **實際成功新增**的單字上，將 Gemini 產生的精簡單字 JSON（含選填 `roots_memory`）另存至本地目錄（與 Anki 牌組並行，供使用者自行備份或版本管理）。
 6. **`main.py`**:
    - 監聽快捷鍵：
      - 截圖模式：`<cmd>+<ctrl>+s`
@@ -54,7 +54,7 @@ macOS 全域工具：
 - 角色：專業英文老師（GRE/TOEFL）。
 - 輸入：使用者反白並複製到剪貼簿的文字（通常是一個單字，可能包含標點或前後空白）。
 - 任務：若輸入為單字（或可合理正規化為單字），產生 1 筆單字卡資料。
-- 正常輸出：嚴格 JSON 物件（同單字卡欄位結構：`word`, `phonetic`, `part_of_speech`, `definition`, `definition_zh`, `difficulty`, `example_sentence`, `synonyms`）。
+- 正常輸出：嚴格 JSON 物件（同單字卡欄位結構：`word`, `phonetic`, `difficulty`、選填 **`roots_memory`**、`senses[]`（內含每義項之 `part_of_speech`, `definition`, `definition_zh`, `example_sentence`, `synonyms`, `usage_patterns` 等））。
 - 例句要求：需符合 GRE/TOEFL 學術難度，且需提供 **2 句**（用同一個欄位承載，建議以換行 `\n` 分隔兩句）。
 - 常用用法要求：需提供常見搭配（特別是介系詞搭配），例如 `interested in`, `capable of`, `apply for`。
 - 異常輸出：
@@ -149,9 +149,10 @@ macOS 全域工具：
 - **AC4**：同一欄位不得重複插入相同的 sound tag（例如 `Audio` 欄位不可出現 `[sound:x.mp3][sound:x.mp3]`）。
 
 ## 需求：Back／Front 版面（多義項區塊、`Front` 音檔與難度）
-- **資料模型**：以 **`senses`**（陣列）描述 1～多個義項（詳見「多義項」需求，含**保守拆分原則**）；每筆含 `part_of_speech`、英／中定義、選填 Synonyms、選填 Usage、以及**該義項專用**的 `example_sentence`（1～2 句，`\n` 分行）。`difficulty` 與 `phonetic` 仍在根層（**`Back` 顯示順序**見下條「單一義項區塊內順序」）。
+- **資料模型**：以 **`senses`**（陣列）描述 1～多個義項（詳見「多義項」需求，含**保守拆分原則**）；每筆含 `part_of_speech`、英／中定義、選填 Synonyms、選填 Usage、以及**該義項專用**的 `example_sentence`（1～2 句，`\n` 分行）。`difficulty` 與 `phonetic` 仍在根層。**整卡選填**欄位 **`roots_memory`**（字串）：字根／字首／字尾簡短拆解 + 中文記憶點或畫面聯想；若無可寫或硬拆無益則 `""`（見下條）。
 - **`Front` 由上而下**：單字 → 音標 → **音檔**（整卡僅一處 `[sound:...]`）→ **`difficulty`**。**不**在 `Front` 顯示詞性（詞性僅出現在 `Back` 各義項與通知預覽等）。
-- **`Back` 由上而下**：僅含義項內容，不含難度與音檔。**每一義項區塊之間**須以水平線（`<hr>` 或等效樣式）隔開；多義項時**不**顯示「Other senses:」等額外標題，僅以分隔線區隔各義項。
+- **`Back` 由上而下**：（選填）**`roots_memory`**（字根／記憶輔助，僅當非空字串時渲染）→ **若有 `roots_memory`，其下方須再一條水平線** → 第一個義項起之義項內容；**不含**難度與音檔。**每一義項區塊之間**須以水平線（`<hr>` 或等效樣式）隔開；多義項時**不**顯示「Other senses:」等額外標題，僅以分隔線區隔各義項。`roots_memory` 區塊位於**最上方**（整張卡層級，非單一義項）。
+- **`roots_memory`（Gemini）**：**選填**，純文字一段；建議含兩部分：① **簡短字根拆解**（如：*convivial*: con (一起) + viv (活／生命) + ‑ial (形容詞詞尾)）；② **記憶點**（一句話或小段中文場景／聯想，可換行）。若該字**不適合拆解**或**誤導性拆解**則輸出 `""`。**不要** HTML／markdown。
 - **單一義項區塊內順序**：英文定義 → **同一行**：`part_of_speech`（詞性）**在前** + 空格 + `definition_zh`（中文釋義，可含句末語體／場景括註），**整行**使用與原中文釋義相同的字級，**字色**與其他正文一致（主題預設；見「字色（可讀性）」）（例如 `verb 正式規定；命令…`）；僅無中文時才單獨顯示詞性該行 → Synonyms → Usage → Examples。
 - **例句目標詞標示（粗體＋底線）**：
   - **是否可行**：可行；Anki `Back` 為 HTML，可對片段加 `<span style="font-weight…;text-decoration:…">`。
@@ -161,7 +162,7 @@ macOS 全域工具：
 - **對齊**：`Back` 義項區塊內容靠左；`Front` 維持置中為主（音檔與難度亦置中）。
 - **字色（可讀性）**：`Front`／`Back` 產卡 HTML **不**內嵌灰階字色（`#666`、`#888` 等），正文一律沿用 **Anki 主題／系統預設字色**（含夜間模式），以提升手機等小螢幕可讀性；例句內 `⟦…⟧` 經程式轉成**粗體＋底線**時仍為 **`color:inherit`**，不另指定顏色。
 - **字級（可讀性）**：義項內 **英文釋義（definition）** 與 **詞性＋中文釋義**（含僅中文或僅詞性之單行）為主要閱讀兩行；其餘區塊（Synonyms、Usage、Examples 與例句內文）採次要字級；`Front` 單字為標題字級，音標／難度與次要內文同級。
-- **預設像素**：英文釋義行與詞性＋中文釋義行由程式常數統一為 **22px**；Synonyms、Usage、Examples（含標題與例句）、`Front` 音標／難度、備援提示文等**其餘內文**為 **18px**（`Front` 單字另為較大標題字級）；若需調整僅改程式常數即可。
+- **預設像素**：英文釋義行與詞性＋中文釋義行由程式常數統一為 **22px**；Synonyms、Usage、Examples（含標題與例句）、`Front` 音標／難度、**`roots_memory` 區塊**、備援提示文等**其餘內文**為 **18px**（`Front` 單字另為較大標題字級）；若需調整僅改程式常數即可。
 - **相容**：舊版根欄位 + `other_senses` 經正規化為 `senses` 後，與新版同一套渲染。
 
 ### 驗收條件
@@ -171,6 +172,7 @@ macOS 全域工具：
 - **AC4**（例句目標詞）：`example_sentence` 中含成對 `⟦…⟧` 時，`Back` 上對應片段為**粗體＋底線**且字色與正文一致；無括號的例句仍可正常閱讀。
 - **AC5**（預設字色）：新產生之 `Front`／`Back` 一般文字不應因內嵌灰階色而在淺色主題下偏淡難讀。
 - **AC6**（字級）：`Back` 上英文釋義與詞性＋中文釋義兩行為較大字級；Synonyms／Usage／Examples 等為其餘字級；`Front` 音標／難度與其餘內文同級（見「預設像素」）。
+- **AC7**（字根／記憶）：`roots_memory` 非空時，`Back` **最上方**顯示該段，且**與第一個義項之間**有一條水平分隔線（與義項間同款樣式）；為空字串時 `Back` **不**出現該區塊與該線。
 
 ## 需求：成功通知內容（單字 + 中文）
 - 當卡片成功新增時，系統通知內容需同時包含：
@@ -256,12 +258,12 @@ macOS 全域工具：
 - **觸發時機**：僅在 AnkiConnect **確認新增成功**的單字上執行（與 `history_logger.record` 使用同一批 `added_words`）；若該批全部為 duplicate（無成功筆數），則不寫入本地檔案。
 - **儲存位置**：預設為專案根目錄下的 `vocabulary/`；可透過環境變數 `WORD_ARCHIVE_DIR` 覆寫（相對路徑則相對於專案根目錄）。
 - **停用**：可透過 `WORD_ARCHIVE_ENABLED=false`（或 `0`）關閉此功能。
-- **檔案格式**：每個單字一個 `*.json` 檔；**僅**寫入 `word`、`phonetic`、`difficulty`、`senses` 與 **`archived_at`**（ISO 8601 UTC）。**不**寫入與 `senses[0]` 重複的根層鏡像（如 `part_of_speech`、`definition_zh`、`other_senses` 等）；執行流程記憶體內仍可保留鏡像供 Anki／通知使用。
+- **檔案格式**：每個單字一個 `*.json` 檔；**僅**寫入 `word`、`phonetic`、`difficulty`、選填 **`roots_memory`**（可為 `""`）、`senses` 與 **`archived_at`**（ISO 8601 UTC）。**不**寫入與 `senses[0]` 重複的根層鏡像（如 `part_of_speech`、`definition_zh`、`other_senses` 等）；執行流程記憶體內仍可保留鏡像供 Anki／通知使用。
 - **檔名規則**：以與歷史去重相同的 **`word` 正規化**（小寫、空白正規化）產生安全檔名；同一單字再次成功存檔時**覆寫**同一檔案（以最新內容為準）。
 - **錯誤隔離**：若目錄無法建立或單檔寫入失敗，不應影響 Anki 寫入與歷史紀錄；僅記錄 log 警告。
 
 ### 驗收條件
-- **AC1**：成功新增至少一張 Anki 卡片後，專案預設的 `vocabulary/` 下可看到對應的 `.json` 檔，且內容含 `word`、`senses` 與 `archived_at`（精簡格式，無根層鏡像重複欄位）。
+- **AC1**：成功新增至少一張 Anki 卡片後，專案預設的 `vocabulary/` 下可看到對應的 `.json` 檔，且內容含 `word`、`senses` 與 `archived_at`（精簡格式，無根層鏡像重複欄位）；若有字根／記憶欄位則含 `roots_memory`。
 - **AC2**：`WORD_ARCHIVE_ENABLED=false` 時，不建立或更新 `vocabulary/`（或指定目錄）中的檔案。
 - **AC3**：佇列重試成功新增時，行為與即時流程一致（成功筆數仍會寫入本地）。
 

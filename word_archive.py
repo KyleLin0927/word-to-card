@@ -39,6 +39,7 @@ def _archive_payload(word: dict, archived_at: str) -> dict:
         "word": word.get("word", ""),
         "phonetic": word.get("phonetic", ""),
         "difficulty": word.get("difficulty", ""),
+        "roots_memory": str(word.get("roots_memory", "") or "").strip(),
         "senses": senses,
         "archived_at": archived_at,
     }
