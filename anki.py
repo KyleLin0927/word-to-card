@@ -431,7 +431,10 @@ def _build_phrase_back_extra(p: dict) -> str:
     )
     sentence_block = ""
     if st:
-        sentence_block = f'<div style="margin-bottom:14px">{st}</div>'
+        sentence_block = (
+            f"{PHRASE_BACK_TOP_RULE}"
+            f'<div style="margin-bottom:14px">{st}</div>'
+        )
     rest_after_sentence = (
         f"{PHRASE_BACK_TOP_RULE}"
         f"{title}"

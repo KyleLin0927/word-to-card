@@ -297,7 +297,7 @@ macOS 全域工具：
 ### 卡片版面（目標）
 **正面**：**Context Sentence** — 由 Gemini **一次寫成完整一行**：英文句 + **`{{c1::…}}`** + **緊接**半形空格與 **`(語意錨點)`**（極短中文，非整句譯）。例：`The theory is rooted {{c1::in}} (紮根於) traditional philosophy.`。程式以 **`phrase_front`** 原文（或後備：`cloze_text` 僅英文 + **`semantic_anchor_zh`** 自動拼接）寫入 Anki「Text」；**外層**以 `text-align:left` **置左對齊**。克漏字仍僅包住結構詞。送進 Anki 前，與 **`phrase` 對應之可見英文**（克漏字**前**之實詞、及少數**後綴**）加 `<u>` 底線。
 
-**背面**：最上方為整句**中文譯文**（僅內文）；其下為橫向分隔線，再 **Full Phrase**（標題 + 片語行含錨點括號）；之後 **Definition**、**Usage Note**（**一段**連續文字：`usage_note` + 必要時句號 + **`register_zh`**，無「語域：」標籤；`register_zh` **僅**在偏書面時由模型填寫）、**Synonyms** — 以 `Back Extra` 內 HTML 呈現。
+**背面**：最上方先一條橫向分隔線，再接整句**中文譯文**（僅內文）；其下再分隔線後 **Full Phrase**（標題 + 片語行含錨點括號）；之後 **Definition**、**Usage Note**（**一段**連續文字：`usage_note` + 必要時句號 + **`register_zh`**，無「語域：」標籤；`register_zh` **僅**在偏書面時由模型填寫）、**Synonyms** — 以 `Back Extra` 內 HTML 呈現。
 
 ### Gemini 輸出（片語）
 - **回傳**：嚴格 JSON；**`phrases`** 為陣列，預設**長度為 0 或 1**（無合格搭配則 `[]`；有則**只收錄一個**對使用者價值最高的搭配，**不並列多個次要候選**）。若環境變數提高 `MAX_PHRASES_PER_RESPONSE`，至多該上限，仍以**雅思／托福／學術／商用**取向排序，勿混 A2 幼稚搭配。
