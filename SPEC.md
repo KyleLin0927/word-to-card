@@ -275,12 +275,36 @@ macOS 全域工具：
 - **AC2**：`WORD_ARCHIVE_ENABLED=false` 時，不建立或更新 `vocabulary/`（或指定目錄）中的檔案。
 - **AC3**：佇列重試成功新增時，行為與即時流程一致（成功筆數仍會寫入本地）。
 
-## 需求：片語 Cloze 牌組（GRE／TOEFL 搭配／慣用語）
+## 需求：片語 Cloze 牌組（動詞用法／介系詞搭配／慣用語）
 
 ### 背景與目標
 - 與現有「單字卡」並行，新增一套**片語／搭配**卡片：正面為**含該片語的完整句子**，片語以**克漏字（Cloze）**隱藏；背面提供完整片語、**整句中文譯文**、釋義、用法提示、同義替換等。
-- 輸入可為**反白／剪貼簿一段文字**或**截圖區域**；若為長篇，由模型**只挑一個**最值得收錄的搭配（對應雅思考官／托福閱寫／學術與商用英文優先；預設每回**僅一筆**，見 `MAX_PHRASES_PER_RESPONSE`）。
-- 若判定**無值得收錄的搭配**（例如僅泛用文法骨架、無考試／語用價值）、或無法產出合格例句／克漏字，則**不新增任何卡片**，不寫入歷史／封存。
+- 輸入可為**反白／剪貼簿一段文字**或**截圖區域**；若為長篇，由模型**只挑一個**最值得收錄的搭配（預設每回**僅一筆**，見 `MAX_PHRASES_PER_RESPONSE`）。
+- 若判定**無值得收錄的搭配**、或無法產出合格例句／克漏字，則**不新增任何卡片**，不寫入歷史／封存。
+
+### 收錄範圍（優先記住「常見用法」）
+除高階慣用語外，**大多數動詞、形容詞、名詞的常見介系詞／小品詞搭配**皆屬合格收錄對象；重點是「這個詞平常怎麼接」，而非僅限成語級片語。
+
+**A. 動詞常見用法**（及物性、介系詞、小品詞）  
+- 動詞＋介系詞／受詞型態等固定或高頻用法，例如 *account for*、*dispose of*、*rely on*、*attribute A to B*。  
+- 片語動詞（phrasal verb）若為閱讀／寫作常見者，同樣收錄。
+
+**B. 形容詞／名詞＋介系詞**  
+- 形容詞或名詞後**固定介系詞**（含 **to**），例如 *impervious to (water)*、*susceptible to*、*immune to*、*devoted to*。  
+- Cloze 通常挖該介系詞（如 `impervious {{c1::to}} (對⋯免疫／不受⋯影響)`）。
+
+**C. 介系詞／不定詞結構片語**（含句首 **To …**）  
+- 固定 **to** 結構或介系詞框架，例如 *To my dismay*、*to some extent*、*due to*、*in addition to*、*with regard to*。  
+- 句首評論性片語（*To my surprise*、*To my dismay*）與形容詞後 **to**（*impervious to*）皆屬此類，**應積極收錄**。
+
+**D. 慣用搭配（原高訊號範圍）**  
+- 雅思／托福／GRE／商用與學術寫作常見之 idiomatic collocations（如 *in line with*、*consistent with*）。
+
+**排序**：長文或截圖含多個候選時，仍只選**一個**；優先序為 **輸入語境中最突出者** ＞ **對閱讀／寫作最常考、最易用錯介系詞者** ＞ 其餘常見搭配。
+
+**仍排除**：無固定搭配關係的純文法骨架（任意主詞＋be＋形容詞而無特定介系詞要求）、以及 **CEFR A2 及以下**過於日常、無學習價值的片語（如 *tell a story*、*have breakfast*、*nice to meet you*）。
+
+**反白短片段**：使用者若反白 *impervious to water*、*rely on*、*account for* 等「實詞＋介系詞（＋受詞）」片段，**一律視為合格輸入**；`phrase` 取核心搭配（如 *impervious to*，不含後方受詞 *water*），**禁止**回傳 `NO_WORTHY_PHRASE`。
 
 ### 快捷鍵（與既有模式分離）
 - **截圖—片語模式**：預設流程同截圖（框選區域），但送交 **片語專用** Gemini 管線與牌組。
@@ -295,15 +319,34 @@ macOS 全域工具：
 - **duplicateScope**：同單字以 **deck** 為範圍；片語牌組與單字牌組互不影響。
 
 ### 卡片版面（目標）
-**正面**：**Context Sentence** — 由 Gemini **一次寫成完整一行**：英文句 + **`{{c1::…}}`** + **緊接**半形空格與 **`(語意錨點)`**（極短中文，非整句譯）。例：`The theory is rooted {{c1::in}} (紮根於) traditional philosophy.`。程式以 **`phrase_front`** 原文（或後備：`cloze_text` 僅英文 + **`semantic_anchor_zh`** 自動拼接）寫入 Anki「Text」；**外層**以 `text-align:left` **置左對齊**。克漏字仍僅包住結構詞。送進 Anki 前，與 **`phrase` 對應之可見英文**（克漏字**前**之實詞、及少數**後綴**）加 `<u>` 底線。
+**正面**：**Context Sentence** — 由 Gemini **一次寫成完整一行**：英文句 + **`{{c1::…}}`** + **緊接**半形空格與 **`(語意錨點)`**（極短中文，非整句譯）。例：`The theory is rooted {{c1::in}} (紮根於) traditional philosophy.`。程式以 **`phrase_front`** 原文（或後備：`cloze_text` 僅英文 + **`semantic_anchor_zh`** 自動拼接）寫入 Anki「Text」；**外層**以 `text-align:left` **置左對齊**。送進 Anki 前，與 **`phrase` 對應之可見英文**（克漏字**前**之實詞、及少數**後綴**）加 `<u>` 底線。
 
 **背面**：最上方先一條橫向分隔線，再接整句**中文譯文**（僅內文）；其下再分隔線後 **Full Phrase**（標題 + 片語行含錨點括號）；之後 **Definition**、**Usage Note**（**一段**連續文字：`usage_note` + 必要時句號 + **`register_zh`**，無「語域：」標籤；`register_zh` **僅**在偏書面時由模型填寫）、**Synonyms** — 以 `Back Extra` 內 HTML 呈現。
 
+### Cloze 挖空規則（與單字卡不同，重要）
+片語卡與單字卡之學習目標不同，**挖空對象必須不同**：
+
+| | 單字卡（Basic） | 片語卡（Cloze） |
+|---|---|---|
+| **學什麼** | 單字本身的意義與用法 | 該詞**怎麼接**（介系詞、小品詞、結構詞） |
+| **挖空／標示對象** | 目標**實詞**（動詞、名詞、形容詞等） | 僅**功能詞**（介系詞、冠詞、不定詞 to、小品詞等） |
+| **禁止** | — | **禁止**挖動詞、名詞、形容詞等**內容詞** |
+
+- **只挖功能詞**：介系詞（*for*、*to*、*with*、*of*…）、冠詞、不定詞 **to**、小品詞（*up*、*off* 等片語動詞中的小品詞）等**結構／語法連接成分**。
+- **禁止挖內容詞**：動詞本體（如 *account*、*rely*、*dispose*）、名詞、形容詞（如 *impervious*、*dismay*）**不得**成為 `{{c1::…}}` 答案。
+- **範例**：
+  - *account **for*** → 挖 `for`，**不**挖 `account`
+  - *impervious **to*** → 挖 `to`，**不**挖 `impervious`
+  - ***To** my dismay* → 挖句首 `To`，**不**挖 `dismay`
+  - *rely **on*** → 挖 `on`，**不**挖 `rely`
+- **禁止**把整段 `phrase` 塞進單一 Cloze；Cloze 答案須為 `phrase` 內之**功能詞子字串**。
+
 ### Gemini 輸出（片語）
-- **回傳**：嚴格 JSON；**`phrases`** 為陣列，預設**長度為 0 或 1**（無合格搭配則 `[]`；有則**只收錄一個**對使用者價值最高的搭配，**不並列多個次要候選**）。若環境變數提高 `MAX_PHRASES_PER_RESPONSE`，至多該上限，仍以**雅思／托福／學術／商用**取向排序，勿混 A2 幼稚搭配。
-- **難度篩選**：鎖定 **雅思、托福（含學術）、GRE、商用與正式學術寫作**常見之搭配；**排除 CEFR A2 及以下**過於日常的片語（例：*tell a story*、*have breakfast*、*go to school* 等純基礎用法），除非文本語境顯然為高階語域且不屬此類——否則 **`NO_WORTHY_PHRASE`**。
+- **回傳**：嚴格 JSON；**`phrases`** 為陣列，預設**長度為 0 或 1**（無合格搭配則 `[]`；有則**只收錄一個**對使用者價值最高的搭配，**不並列多個次要候選**）。若環境變數提高 `MAX_PHRASES_PER_RESPONSE`，至多該上限，仍以「收錄範圍」與排序規則篩選，勿混 A2 幼稚搭配。
+- **難度篩選**：**B1 及以上**、閱讀／寫作中反覆出現的**動詞用法、形容詞／名詞＋介系詞、介系詞／to 結構片語、慣用搭配**皆應積極收錄；**勿**僅因「只是介系詞搭配」而拒收（如 *impervious to*、*To my dismay*）。**排除** CEFR A2 及以下過於日常的片語（例：*tell a story*、*have breakfast*、*go to school*）——否則 **`NO_WORTHY_PHRASE`**。
+- **Cloze 原則**（見上節「Cloze 挖空規則」）：**僅挖功能詞，不挖動詞／名詞／形容詞等內容詞**；與單字卡標示目標實詞之規則相反。
 - **每筆**：至少 **`phrase`**、**`phrase_front`**（**建議**）、**`cloze_text`**（**後備**）、**`semantic_anchor_zh`**（**後備**）、**`sentence_zh`**、**`definition_zh`**、**`usage_note`**、**`register_zh`**（**選填**；**僅**在搭配**明顯以書面／學術／正式為主**時填寫一句，否則 `""`；程式以**同一段**併入 **Usage Note**）、**`synonyms`**（欄位定義同前條款）。
-- **程式**：由 **`phrase_front`** 剥離括號得到純英文句供驗證與 **`cloze_text`** 存檔；錨點優先取自 **`}}` 後括號**，否則取自 **`semantic_anchor_zh`**；無 **phrase_front** 時以英文 **`cloze_text` + `semantic_anchor_zh`** 組出正面。
+- **程式**：由 **`phrase_front`** 剥離括號得到純英文句供驗證與 **`cloze_text`** 存檔；錨點優先取自 **`}}` 後括號**，否則取自 **`semantic_anchor_zh`**；若模型未提供錨點，程式以 Cloze 功能詞或 `definition_zh` 產生**後備錨點**，避免合格 JSON 被靜默丟棄。輸入疑似「實詞＋介系詞」搭配而首次回傳空結果時，程式以**強制收錄提示**重試一次。
 - **全拒絕**：`phrases: []` 或約定 **`{"error":"NO_WORTHY_PHRASE"}`**，程式不存檔。
 - **長文**：只選**單一**最優先搭配；單次產出上限（預設 **1**，`MAX_PHRASES_PER_RESPONSE`）。
 - **截圖僅單字／無整句**：允許模型**自造一句**自然學術英文作為 Context，並嵌入該搭配後再做 Cloze；仍須忠於畫面可辨識之線索。
@@ -325,6 +368,9 @@ macOS 全域工具：
 - **AC3**：無合格片語時零寫入。
 - **AC4**：Anki 中 Cloze 正面可正常隱藏；**挖空後**緊接括號內之**短中文錨點**；背面含**整句中文譯文**及其餘區塊可讀。
 - **AC5**：預設同一輸入**至多一張**片語卡；若提高 `MAX_PHRASES_PER_RESPONSE`，至多該筆數且各自去重。
+- **AC6**（收錄範圍）：反白或截圖含 *impervious to*、*To my dismay*、*account for* 等**常見動詞／介系詞搭配**時，模型應能產出合格片語卡，而非僅限 idiomatic collocation 才收錄。
+- **AC7**（Cloze／與單字卡區別）：Cloze 答案**僅能**為功能詞（介系詞、冠詞、to、小品詞等），**不得**為動詞、名詞、形容詞等內容詞；例：*account for* 挖 `for` 不挖 `account`，*impervious to* 挖 `to` 不挖 `impervious`。
+- **AC8**（反白短片段）：反白 *impervious to water* 時應產出片語卡（`phrase` 為 *impervious to*，Cloze 挖 `to`），不得回傳「未找到值得收錄的搭配」。
 
 ---
 
