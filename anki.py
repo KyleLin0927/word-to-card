@@ -16,6 +16,10 @@ HR_BETWEEN_SENSES = '<hr style="border:none;border-top:1px solid #eee;margin:16p
 PHRASE_BACK_TOP_RULE = (
     '<hr style="border:none;border-top:1px solid #ccc;margin:0 0 16px 0">'
 )
+# 片語卡正面：目標單字列與 Cloze 題幹之間
+PHRASE_FRONT_AFTER_WORD_RULE = (
+    '<hr style="border:none;border-top:1px solid #ccc;margin:12px 0 14px 0">'
+)
 
 # 義項內「英文釋義」與「詞性＋中文釋義」兩行（較大）
 _FONT_DEF_PX = 22
@@ -200,6 +204,17 @@ def _build_one_sense_inner(sense: dict) -> str:
     return "".join(parts)
 
 
+def _format_front_word_line(word: str) -> str:
+    """單字卡 Front 第一行（片語卡正面目標單字列沿用此格式）。"""
+    w = html.escape(str(word or "").strip())
+    if not w:
+        return ""
+    return (
+        f'<div style="font-size:{_FONT_WORD_PX}px;font-weight:bold;text-align:center;'
+        f'margin-bottom:6px;line-height:1.2">{w}</div>'
+    )
+
+
 def _build_front(word: dict) -> str:
     phonetic = word.get("phonetic", "")
     difficulty = str(word.get("difficulty", "") or "").strip()
@@ -209,11 +224,10 @@ def _build_front(word: dict) -> str:
         else ""
     )
     return (
-        f'<div style="font-size:{_FONT_WORD_PX}px;font-weight:bold;text-align:center;margin-bottom:6px;line-height:1.2">'
-        f'{word["word"]}</div>'
-        f'<div style="font-size:{_FONT_BODY_PX}px;text-align:center;line-height:1.5">{phonetic}</div>'
-        f'<div style="text-align:center;margin-top:8px">{W2C_AUDIO_MARKER}</div>'
-        f"{diff_html}"
+        _format_front_word_line(str(word.get("word", "") or ""))
+        + f'<div style="font-size:{_FONT_BODY_PX}px;text-align:center;line-height:1.5">{phonetic}</div>'
+        + f'<div style="text-align:center;margin-top:8px">{W2C_AUDIO_MARKER}</div>'
+        + f"{diff_html}"
     )
 
 
@@ -377,12 +391,98 @@ def underline_phrase_on_cloze_front(phrase_front: str, phrase: str) -> str:
     return new_before + mid + new_after
 
 
-def wrap_phrase_front_left(front: str) -> str:
-    """Cloze 正面欄位整體置左（Anki 預設有時置中）。"""
+_PHRASE_FUNCTION_WORDS = frozenset(
+    {
+        "to",
+        "for",
+        "of",
+        "in",
+        "on",
+        "at",
+        "with",
+        "from",
+        "by",
+        "into",
+        "onto",
+        "upon",
+        "about",
+        "off",
+        "up",
+        "out",
+        "down",
+        "over",
+        "through",
+        "as",
+        "the",
+        "a",
+        "an",
+        "than",
+        "but",
+        "or",
+        "and",
+        "against",
+        "between",
+        "among",
+        "toward",
+        "towards",
+        "via",
+        "per",
+        "after",
+        "before",
+        "during",
+        "under",
+        "without",
+        "within",
+        "beyond",
+        "despite",
+        "except",
+    }
+)
+
+
+def _extract_phrase_target_word(phrase: str, cloze_text: str) -> str:
+    """自 phrase + Cloze 推導核心實詞（介系詞等功能詞前之 headword）。"""
+    m = _PHRASE_CLOZE_C1.search(cloze_text or "")
+    if not m:
+        return ""
+    blob = m.group(1).strip()
+    pn = (phrase or "").strip()
+    if not pn or not blob:
+        return ""
+    pnl = pn.lower()
+    bll = blob.lower()
+    idx = pnl.find(bll)
+    if idx <= 0:
+        return ""
+    prefix = pn[:idx].strip()
+    if not prefix:
+        return ""
+    head = prefix.split()[0].strip()
+    if not head or head.lower() in _PHRASE_FUNCTION_WORDS:
+        return ""
+    return head
+
+
+def _resolve_phrase_target_word(p: dict) -> str:
+    explicit = str(p.get("target_word", "") or "").strip()
+    if explicit:
+        return explicit
+    phrase = str(p.get("phrase", "") or "").strip()
+    cloze = str(p.get("cloze_text", "") or p.get("phrase_front", "") or "").strip()
+    return _extract_phrase_target_word(phrase, cloze)
+
+
+def wrap_phrase_front_left(front: str, *, target_word: str = "") -> str:
+    """Cloze 正面欄位整體置左；可選在最上方加與單字卡相同格式的目標單字列。"""
     t = (front or "").strip()
     if not t:
         return t
-    return f'<div style="text-align:left;line-height:1.55">{t}</div>'
+    word_line = _format_front_word_line(target_word)
+    if word_line:
+        body = f"{word_line}{PHRASE_FRONT_AFTER_WORD_RULE}{t}"
+    else:
+        body = t
+    return f'<div style="text-align:left;line-height:1.55">{body}</div>'
 
 
 def format_phrase_front_text(cloze_text_en: str, semantic_anchor_zh: str) -> str:
@@ -471,7 +571,9 @@ def add_phrases_to_anki_results(phrases: list[dict]) -> list[object]:
         front = underline_phrase_on_cloze_front(
             front, str(p.get("phrase", "") or "").strip()
         )
-        front = wrap_phrase_front_left(front)
+        front = wrap_phrase_front_left(
+            front, target_word=_resolve_phrase_target_word(p)
+        )
         notes.append(
             {
                 "deckName": config.ANKI_PHRASE_DECK_NAME,

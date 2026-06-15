@@ -569,6 +569,7 @@ def _phrase_image_prompt() -> str:
   "phrases": [
     {{
       "phrase": "canonical 片語字串（供去重），如 impervious to 或 To my dismay",
+      "target_word": "impervious",
       "phrase_front": "The coating is impervious {{{{c1::to}}}} (對⋯免疫／不受⋯影響) water.",
       "sentence_zh": "這層塗料能防水／不受水影響。",
       "definition_zh": "簡短中文釋義",
@@ -590,6 +591,7 @@ def _phrase_image_prompt() -> str:
 - **sentence_zh**（必填）：整句中文翻譯——對應 **`phrase_front`**（或後備 **`cloze_text`**）那句英文；**勿**與 **definition_zh** 混用。
 - **register_zh**（選填）：**僅當**此搭配**明顯以書面／學術／正式寫作為主**（論文、報告、書函；口語較少這樣說）時，才用**一句極短中文**提醒「偏向書面／正式語域」。**若不偏書面**（口語也常見、口語書面皆可且無特別正式感），務必填 **`""`**，勿在此重複 Usage。
 - **phrase**：完整慣用搭配（去重）；**`{{{{c1::…}}}}` 內答案**須為 **`phrase` 內之功能詞子字串**（介系詞、to、小品詞等），**不可**為動詞／名詞／形容詞。
+- **target_word**（選填）：搭配核心實詞（如 *impervious to* → `impervious`、*account for* → `account`）；句首結構片語（*To my dismay*）或純介系詞框架（*due to*）填 `""`。
 只回傳 JSON。"""
 
 
@@ -616,6 +618,7 @@ def _phrase_text_prompt() -> str:
   "phrases": [
     {{
       "phrase": "impervious to",
+      "target_word": "impervious",
       "phrase_front": "The coating is impervious {{{{c1::to}}}} (對⋯免疫／不受⋯影響) water.",
       "sentence_zh": "這層塗料能防水／不受水影響。",
       "definition_zh": "簡短中文釋義",
@@ -636,6 +639,7 @@ def _phrase_text_prompt() -> str:
 - **sentence_zh**（必填）：見截圖版。
 - **register_zh**：見截圖版（**僅偏書面時**填；否則 `""`）。
 - **phrase**：完整搭配（去重用）；**`{{{{c1::…}}}}` 內答案**須為 **`phrase` 內之功能詞子字串**，**不可**為內容詞。
+- **target_word**（選填）：見截圖版；有核心實詞時填寫（如 impervious），否則 `""`。
 - 若貼上無完整句，請**自造一句**自然學術英文，嵌入該搭配後再做 Cloze。
 只回傳 JSON。"""
 
@@ -761,6 +765,7 @@ def _normalize_phrase_entry(raw: dict) -> dict | None:
     reg = str(raw.get("register_zh", "") or "").strip()
     if len(reg) > _MAX_REGISTER_ZH_LEN:
         reg = reg[:_MAX_REGISTER_ZH_LEN]
+    target_word = str(raw.get("target_word", "") or "").strip()
     return {
         "phrase": phrase,
         "phrase_front": phrase_front_out,
@@ -771,6 +776,7 @@ def _normalize_phrase_entry(raw: dict) -> dict | None:
         "usage_note": un,
         "register_zh": reg,
         "synonyms": synonyms,
+        "target_word": target_word,
     }
 
 

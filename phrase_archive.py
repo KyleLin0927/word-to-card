@@ -31,6 +31,7 @@ def _payload(p: dict, archived_at: str) -> dict:
         syn_out = [s.strip() for s in str(syn or "").split(",") if s.strip()]
     return {
         "phrase": str(p.get("phrase", "")).strip(),
+        "target_word": str(p.get("target_word", "")).strip(),
         "phrase_front": str(p.get("phrase_front", "")).strip(),
         "cloze_text": str(p.get("cloze_text", "")).strip(),
         "semantic_anchor_zh": str(p.get("semantic_anchor_zh", "")).strip(),

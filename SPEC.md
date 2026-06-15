@@ -319,7 +319,10 @@ macOS 全域工具：
 - **duplicateScope**：同單字以 **deck** 為範圍；片語牌組與單字牌組互不影響。
 
 ### 卡片版面（目標）
-**正面**：**Context Sentence** — 由 Gemini **一次寫成完整一行**：英文句 + **`{{c1::…}}`** + **緊接**半形空格與 **`(語意錨點)`**（極短中文，非整句譯）。例：`The theory is rooted {{c1::in}} (紮根於) traditional philosophy.`。程式以 **`phrase_front`** 原文（或後備：`cloze_text` 僅英文 + **`semantic_anchor_zh`** 自動拼接）寫入 Anki「Text」；**外層**以 `text-align:left` **置左對齊**。送進 Anki 前，與 **`phrase` 對應之可見英文**（克漏字**前**之實詞、及少數**後綴**）加 `<u>` 底線。
+**正面**（由上而下）：
+1. **目標單字列（選填）**：若搭配有明確核心實詞（如 *impervious to* 的 *impervious*、*account for* 的 *account*），正面**最上方**顯示該字，**HTML 樣式與單字卡 `Front` 第一行完全相同**（置中、32px、粗體）。句首結構片語（如 *To my dismay*）、純介系詞框架（如 *due to*）等**無單一核心實詞**時省略此列。
+2. **水平分隔線（僅當有目標單字列時）**：目標單字與下方 Cloze 題幹之間一條橫線（與背面頂部分隔線同款樣式）。
+3. **Context Sentence**：英文句 + **`{{c1::…}}`** + **緊接**半形空格與 **`(語意錨點)`**（極短中文，非整句譯）。例：`The theory is rooted {{c1::in}} (紮根於) traditional philosophy.`。程式以 **`phrase_front`** 原文（或後備：`cloze_text` 僅英文 + **`semantic_anchor_zh`** 自動拼接）寫入 Anki「Text」；**外層**以 `text-align:left` **置左對齊**（目標單字列仍維持與單字卡相同之置中樣式）。送進 Anki 前，與 **`phrase` 對應之可見英文**（克漏字**前**之實詞、及少數**後綴**）加 `<u>` 底線。
 
 **背面**：最上方先一條橫向分隔線，再接整句**中文譯文**（僅內文）；其下再分隔線後 **Full Phrase**（標題 + 片語行含錨點括號）；之後 **Definition**、**Usage Note**（**一段**連續文字：`usage_note` + 必要時句號 + **`register_zh`**，無「語域：」標籤；`register_zh` **僅**在偏書面時由模型填寫）、**Synonyms** — 以 `Back Extra` 內 HTML 呈現。
 
@@ -345,8 +348,8 @@ macOS 全域工具：
 - **回傳**：嚴格 JSON；**`phrases`** 為陣列，預設**長度為 0 或 1**（無合格搭配則 `[]`；有則**只收錄一個**對使用者價值最高的搭配，**不並列多個次要候選**）。若環境變數提高 `MAX_PHRASES_PER_RESPONSE`，至多該上限，仍以「收錄範圍」與排序規則篩選，勿混 A2 幼稚搭配。
 - **難度篩選**：**B1 及以上**、閱讀／寫作中反覆出現的**動詞用法、形容詞／名詞＋介系詞、介系詞／to 結構片語、慣用搭配**皆應積極收錄；**勿**僅因「只是介系詞搭配」而拒收（如 *impervious to*、*To my dismay*）。**排除** CEFR A2 及以下過於日常的片語（例：*tell a story*、*have breakfast*、*go to school*）——否則 **`NO_WORTHY_PHRASE`**。
 - **Cloze 原則**（見上節「Cloze 挖空規則」）：**僅挖功能詞，不挖動詞／名詞／形容詞等內容詞**；與單字卡標示目標實詞之規則相反。
-- **每筆**：至少 **`phrase`**、**`phrase_front`**（**建議**）、**`cloze_text`**（**後備**）、**`semantic_anchor_zh`**（**後備**）、**`sentence_zh`**、**`definition_zh`**、**`usage_note`**、**`register_zh`**（**選填**；**僅**在搭配**明顯以書面／學術／正式為主**時填寫一句，否則 `""`；程式以**同一段**併入 **Usage Note**）、**`synonyms`**（欄位定義同前條款）。
-- **程式**：由 **`phrase_front`** 剥離括號得到純英文句供驗證與 **`cloze_text`** 存檔；錨點優先取自 **`}}` 後括號**，否則取自 **`semantic_anchor_zh`**；若模型未提供錨點，程式以 Cloze 功能詞或 `definition_zh` 產生**後備錨點**，避免合格 JSON 被靜默丟棄。輸入疑似「實詞＋介系詞」搭配而首次回傳空結果時，程式以**強制收錄提示**重試一次。
+- **每筆**：至少 **`phrase`**、**`phrase_front`**（**建議**）、**`cloze_text`**（**後備**）、**`semantic_anchor_zh`**（**後備**）、**`sentence_zh`**、**`definition_zh`**、**`usage_note`**、**`register_zh`**（**選填**）、**`target_word`**（**選填**；搭配核心實詞，如 *impervious*；無則 `""`）、**`synonyms`**（欄位定義同前條款）。
+- **程式**：由 **`phrase_front`** 剥離括號得到純英文句供驗證與 **`cloze_text`** 存檔；錨點優先取自 **`}}` 後括號**，否則取自 **`semantic_anchor_zh`**；若模型未提供錨點，程式以 Cloze 功能詞或 `definition_zh` 產生**後備錨點**。`target_word` 缺省時，程式可自 `phrase` 與 Cloze 推導（介系詞前之核心實詞）。輸入疑似「實詞＋介系詞」搭配而首次回傳空結果時，程式以**強制收錄提示**重試一次。
 - **全拒絕**：`phrases: []` 或約定 **`{"error":"NO_WORTHY_PHRASE"}`**，程式不存檔。
 - **長文**：只選**單一**最優先搭配；單次產出上限（預設 **1**，`MAX_PHRASES_PER_RESPONSE`）。
 - **截圖僅單字／無整句**：允許模型**自造一句**自然學術英文作為 Context，並嵌入該搭配後再做 Cloze；仍須忠於畫面可辨識之線索。
@@ -371,6 +374,7 @@ macOS 全域工具：
 - **AC6**（收錄範圍）：反白或截圖含 *impervious to*、*To my dismay*、*account for* 等**常見動詞／介系詞搭配**時，模型應能產出合格片語卡，而非僅限 idiomatic collocation 才收錄。
 - **AC7**（Cloze／與單字卡區別）：Cloze 答案**僅能**為功能詞（介系詞、冠詞、to、小品詞等），**不得**為動詞、名詞、形容詞等內容詞；例：*account for* 挖 `for` 不挖 `account`，*impervious to* 挖 `to` 不挖 `impervious`。
 - **AC8**（反白短片段）：反白 *impervious to water* 時應產出片語卡（`phrase` 為 *impervious to*，Cloze 挖 `to`），不得回傳「未找到值得收錄的搭配」。
+- **AC9**（正面目標單字）：*impervious to* 等搭配之正面最上方可見 **impervious**，字級／粗體／置中與單字卡 `Front` 第一行一致；其下有一條水平分隔線後才是 Cloze 題幹；*To my dismay* 等無核心實詞者不出現目標單字列與該分隔線。
 
 ---
 
