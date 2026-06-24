@@ -56,13 +56,13 @@ macOS 全域工具：
 
 ## Gemini Text 指令規範（反白取詞模式）
 - 角色：專業英文老師（GRE/TOEFL）。
-- 輸入：使用者反白並複製到剪貼簿的文字（通常是一個單字，可能包含標點或前後空白）。
-- 任務：若輸入為單字（或可合理正規化為單字），產生 1 筆單字卡資料。
-- 正常輸出：嚴格 JSON 物件（同單字卡欄位結構：`word`, `phonetic`, `difficulty`、選填 **`roots_memory`**、`senses[]`（內含每義項之 `part_of_speech`, `definition`, `definition_zh`, `example_sentence`, `synonyms`, `usage_patterns` 等））。
+- 輸入：使用者反白並複製到剪貼簿的文字（通常是一個單字，可能包含標點或前後空白；亦可能是 **2～8 詞的固定整塊片語 chunk**）。
+- 任務：若輸入為**單一英文單字**、可正規化為單字、或為**值得收錄的固定片語 chunk**（整段作為一個學習單位，如 *beyond reproach*、*on impulse*），產生 1 筆單字卡資料；`word` 欄位填單字或**整段 chunk**。
+- 正常輸出：嚴格 JSON 物件（同單字卡欄位結構：`word`, `phonetic`, `difficulty`、選填 **`roots_memory`**、`senses[]`（內含每義項之 `part_of_speech`, `definition`, `definition_zh`, `example_sentence`, `synonyms`, `usage_patterns` 等））。Chunk 時 `roots_memory` 通常為 `""`；`part_of_speech` 可用 `phrase`／`idiom`；例句以 **⟦整段 chunk⟧** 標示。
 - 例句要求：需符合 GRE/TOEFL 學術難度，且需提供 **2 句**（用同一個欄位承載，建議以換行 `\n` 分隔兩句）。
 - 常用用法要求：需提供常見搭配（特別是介系詞搭配），例如 `interested in`, `capable of`, `apply for`。
 - 異常輸出：
-  - 若輸入不是單字（例如空字串、過長句子、或無法判斷），請回傳：`{"error":"NOT_A_WORD"}`。
+  - 若輸入不是單字也不是合格 chunk（例如空字串、過長句子、或無法判斷），請回傳：`{"error":"NOT_A_WORD"}`。
 - 只回傳 JSON，不要任何說明文字或 markdown。
 
 ## 需求：反白取詞（剪貼簿攔截）作為第二種輸入方式
@@ -306,6 +306,22 @@ macOS 全域工具：
 
 **反白短片段**：使用者若反白 *impervious to water*、*rely on*、*account for* 等「實詞＋介系詞（＋受詞）」片段，**一律視為合格輸入**；`phrase` 取核心搭配（如 *impervious to*，不含後方受詞 *water*），**禁止**回傳 `NO_WORTHY_PHRASE`。
 
+### 分流：搭配（Cloze）vs 整塊片語（Chunk → 單字卡）
+片語快捷鍵／截圖流程中，Gemini **先分類**再路由（**不新增熱鍵、不新增詞庫**）：
+
+| 類型 | 學習目標 | 輸出 | 去向 |
+|------|----------|------|------|
+| **collocation**（搭配） | headword **怎麼接**介系詞／小品詞 | 既有 `phrases[]` Cloze JSON | **`ANKI_PHRASE_DECK_NAME`**、`phrase_history` |
+| **chunk**（整塊片語） | **整段說法**當一個單位記憶 | 與單字卡相同之 `word` JSON（`word` 欄位為整段片語，如 *beyond reproach*） | **`ANKI_DECK_NAME`**、`word_history`、`vocabulary/`（與單字卡共用） |
+
+**Chunk 範例**：*beyond reproach*、*on impulse*、*in light of*、*state of the art*、*the prospect of*（整塊記憶，非單一介系詞練習）。
+
+**Collocation 範例**：*impervious to*、*account for*、*penchant for*（有明確 headword，練介系詞）。
+
+**單字反白（Ctrl+C）**：`TEXT` 流程亦接受 **2～8 詞**之固定 chunk（`word` 填整段），與單字共用牌組與去重。
+
+**JSON 路由**：片語管線回傳 `{"kind":"collocation","phrases":[…]}` 或 `{"kind":"chunk","word":{…單字卡物件…}}`；無合格項則 `NO_WORTHY_PHRASE`。
+
 ### 快捷鍵（與既有模式分離）
 - **截圖—片語模式**：預設流程同截圖（框選區域），但送交 **片語專用** Gemini 管線與牌組。
   - 環境變數 **`HOTKEY_SCREENSHOT_PHRASE`**（預設 `<cmd>+<ctrl>+d`，可覆寫）。
@@ -375,6 +391,7 @@ macOS 全域工具：
 - **AC7**（Cloze／與單字卡區別）：Cloze 答案**僅能**為功能詞（介系詞、冠詞、to、小品詞等），**不得**為動詞、名詞、形容詞等內容詞；例：*account for* 挖 `for` 不挖 `account`，*impervious to* 挖 `to` 不挖 `impervious`。
 - **AC8**（反白短片段）：反白 *impervious to water* 時應產出片語卡（`phrase` 為 *impervious to*，Cloze 挖 `to`），不得回傳「未找到值得收錄的搭配」。
 - **AC9**（正面目標單字）：*impervious to* 等搭配之正面最上方可見 **impervious**，字級／粗體／置中與單字卡 `Front` 第一行一致；其下有一條水平分隔線後才是 Cloze 題幹；*To my dismay* 等無核心實詞者不出現目標單字列與該分隔線。
+- **AC10**（Chunk 分流）：片語快捷鍵反白 *beyond reproach* 等整塊片語時，應產出**單字卡**（`word` 為整段片語）進 **`ANKI_DECK_NAME`**，**不**進 Cloze 片語牌組；*impervious to* 仍進 Cloze 牌組。
 
 ---
 

@@ -163,6 +163,70 @@ def _word_names(words: list[dict]) -> str:
     return ", ".join(names)
 
 
+def _ingest_word_cards(
+    words: list[dict],
+    *,
+    empty_history_title: str = "已收錄",
+    empty_history_body: str | None = None,
+    success_title_prefix: str = "已新增",
+) -> int:
+    """寫入單字牌組（含 chunk 片語）；回傳實際新增張數。"""
+    if not words:
+        return 0
+    new_words = history_logger.filter_new(words)
+    skipped = len(words) - len(new_words)
+    if not new_words:
+        body = empty_history_body or f"{skipped} 個已在歷史記錄中"
+        notify(empty_history_title, body)
+        return 0
+
+    log.info("寫入 Anki（單字牌組）：%s", _word_names(new_words))
+    results = add_cards_to_anki_results(new_words)
+    added_words = [w for w, r in zip(new_words, results) if r is not None]
+    _record_added(added_words)
+    added = len(added_words)
+    preview = _format_word_preview(added_words)
+
+    if added == 0:
+        notify(
+            "未新增卡片",
+            f"Anki 可能皆為重複：{_word_names(new_words)}" if new_words else "Anki 未新增",
+        )
+    else:
+        notify_success(f"{success_title_prefix} {added} 張卡片", preview or "（無預覽文字）")
+    log.info("單字牌組完成：新增 %d 張（%s）", added, preview)
+    if skipped:
+        log.info("單字牌組：跳過歷史 %d 筆", skipped)
+    return added
+
+
+def _ingest_phrase_collocations(phrases: list[dict]) -> int:
+    """寫入片語 Cloze 牌組；回傳實際新增張數。"""
+    if not phrases:
+        return 0
+    new_phrases = phrase_history.filter_new(phrases)
+    skipped = len(phrases) - len(new_phrases)
+    if not new_phrases:
+        notify("片語已收錄", f"{skipped} 筆已在片語歷史中")
+        return 0
+
+    log.info("寫入 Anki（片語牌組）：%s", _phrase_names(new_phrases))
+    results = add_phrases_to_anki_results(new_phrases)
+    added_phrases = [p for p, r in zip(new_phrases, results) if r is not None]
+    _record_phrases_added(added_phrases)
+    added = len(added_phrases)
+    preview = _format_phrase_preview(added_phrases)
+
+    if added == 0:
+        notify("片語未新增", "Anki 可能皆為重複")
+    else:
+        notify_success(f"已新增 {added} 張片語卡", preview or "（無預覽）")
+    log.info("片語完成：新增 %d 張（%s）", added, preview)
+    if skipped:
+        log.info("片語：跳過歷史 %d 筆", skipped)
+    return added
+
+
 def _copy_selection_to_clipboard(wait_ms: int = 120) -> tuple[str, str]:
     """
     用剪貼簿攔截法取得反白文字。
@@ -205,36 +269,16 @@ def process_selection() -> None:
             notify("未取得反白文字", "請先反白一個單字再按 Ctrl+C")
             return
 
-        notify("Word to Card", "Gemini 解析單字中，請稍候…")
+        notify("Word to Card", "Gemini 解析中，請稍候…")
         log.info("送出剪貼簿文字至 Gemini（模型：%s）", config.GEMINI_MODEL)
         words = analyze_text(selected_text)
         if not words:
-            log.info("Gemini 判定非單字或無結果：%r", selected_text[:80])
-            notify("不是單字", "請反白單一英文單字再試一次")
+            log.info("Gemini 判定非單字/chunk 或無結果：%r", selected_text[:80])
+            notify("無法收錄", "請反白單一英文單字或固定片語再試")
             return
 
-        new_words = history_logger.filter_new(words)
-        skipped = len(words) - len(new_words)
-        if not new_words:
-            notify("已收錄", f"{skipped} 個單字已在歷史記錄中")
-            return
-
-        log.info("寫入 Anki：%s", _word_names(new_words))
-        results = add_cards_to_anki_results(new_words)
-        added_words = [w for w, r in zip(new_words, results) if r is not None]
-        _record_added(added_words)
-        added = len(added_words)
-
-        word_preview = _format_word_preview(added_words)
-        if added == 0:
-            names = _word_names(new_words)
-            notify(
-                "未新增卡片",
-                (f"Anki 可能皆為重複：{names}" if names else "Anki 未新增任何筆記（可能皆為重複）"),
-            )
-        else:
-            notify_success(f"已新增 {added} 張卡片", word_preview or "（無預覽文字）")
-        log.info("完成：新增 %d 張卡片（%s）", added, word_preview)
+        added = _ingest_word_cards(words)
+        log.info("完成：新增 %d 張卡片", added)
     except Exception as e:
         log.error("反白取詞流程失敗：%s", e)
         notify("取詞流程失敗", str(e))
@@ -335,56 +379,43 @@ def process_screenshot_phrase() -> None:
 
     log.info("送出片語截圖至 Gemini（模型：%s）", config.GEMINI_MODEL)
     try:
-        phrases = analyze_image_phrases(image_path)
+        analysis = analyze_image_phrases(image_path)
     except Exception as e:
         log.error("片語 Gemini 分析失敗：%s", e)
         notify("片語分析失敗，已加入片語重試佇列", str(e))
         phrase_queue_manager.enqueue(image_path)
         return
 
-    if not phrases:
-        log.warning("片語：無合格搭配（或圖片不清晰）")
-        notify("未收錄片語", "未辨識到值得收錄的搭配")
+    if not analysis.has_any:
+        log.warning("片語：無合格搭配／chunk（或圖片不清晰）")
+        notify("未收錄", "未辨識到值得收錄的搭配或片語")
         os.unlink(image_path)
         return
 
-    log.info("Gemini 片語 %d 筆：%s", len(phrases), _phrase_names(phrases))
+    if analysis.chunks:
+        log.info("片語分流：chunk → 單字牌組 %s", _word_names(analysis.chunks))
+    if analysis.collocations:
+        log.info("片語分流：collocation %d 筆：%s", len(analysis.collocations), _phrase_names(analysis.collocations))
 
-    new_phrases = phrase_history.filter_new(phrases)
-    skipped = len(phrases) - len(new_phrases)
-    if skipped:
-        log.info("片語過濾已收錄 %d 筆，剩餘 %d 筆", skipped, len(new_phrases))
-
-    if not new_phrases:
-        notify("片語皆已收錄", f"{skipped} 筆已在片語歷史中")
-        os.unlink(image_path)
-        return
-
-    log.info("寫入 Anki（片語牌組）：%s", _phrase_names(new_phrases))
+    added_words = 0
+    added_phrases = 0
     try:
-        results = add_phrases_to_anki_results(new_phrases)
+        if analysis.chunks:
+            added_words = _ingest_word_cards(
+                analysis.chunks,
+                success_title_prefix="已新增（整塊片語）",
+            )
+        if analysis.collocations:
+            added_phrases = _ingest_phrase_collocations(analysis.collocations)
     except Exception as e:
         log.error("片語 Anki 寫入失敗：%s", e)
         notify("片語 Anki 失敗，已加入片語重試佇列", str(e))
         phrase_queue_manager.enqueue(image_path)
         return
 
-    added_phrases = [p for p, r in zip(new_phrases, results) if r is not None]
-    _record_phrases_added(added_phrases)
     os.unlink(image_path)
-
-    preview = _format_phrase_preview(added_phrases)
-    added = len(added_phrases)
-    log.info("片語完成：新增 %d 張（%s）", added, preview)
-    if skipped:
-        preview = (preview + f"（跳過歷史 {skipped}）") if preview else f"跳過歷史 {skipped}"
-    if added == 0:
-        notify(
-            "片語未新增",
-            (f"可能皆重複：{_phrase_names(new_phrases)}" if new_phrases else "Anki 未新增"),
-        )
-    else:
-        notify_success(f"已新增 {added} 張片語卡", preview or "（無預覽）")
+    if added_words == 0 and added_phrases == 0:
+        notify("未新增", "可能皆已收錄或 Anki 重複")
 
 
 def process_selection_phrase() -> None:
@@ -408,30 +439,32 @@ def process_selection_phrase() -> None:
 
         notify("Word to Card 片語", "Gemini 解析片語中…")
         log.info("送出片語剪貼簿文字至 Gemini（模型：%s）", config.GEMINI_MODEL)
-        phrases = analyze_text_phrases(text)
-        if not phrases:
-            log.info("片語：無合格搭配")
-            notify("未收錄片語", "未找到值得收錄的搭配")
+        analysis = analyze_text_phrases(text)
+        if not analysis.has_any:
+            log.info("片語：無合格搭配或 chunk")
+            notify("未收錄", "未找到值得收錄的搭配或片語")
             return
 
-        new_phrases = phrase_history.filter_new(phrases)
-        skipped = len(phrases) - len(new_phrases)
-        if not new_phrases:
-            notify("片語已收錄", f"{skipped} 筆已在片語歷史中")
-            return
+        if analysis.chunks:
+            log.info("片語分流：chunk → 單字牌組 %s", _word_names(analysis.chunks))
+        if analysis.collocations:
+            log.info(
+                "片語分流：collocation %s",
+                _phrase_names(analysis.collocations),
+            )
 
-        log.info("寫入 Anki（片語牌組）：%s", _phrase_names(new_phrases))
-        results = add_phrases_to_anki_results(new_phrases)
-        added_phrases = [p for p, r in zip(new_phrases, results) if r is not None]
-        _record_phrases_added(added_phrases)
-        added = len(added_phrases)
-        preview = _format_phrase_preview(added_phrases)
+        added_words = 0
+        added_phrases = 0
+        if analysis.chunks:
+            added_words = _ingest_word_cards(
+                analysis.chunks,
+                success_title_prefix="已新增（整塊片語）",
+            )
+        if analysis.collocations:
+            added_phrases = _ingest_phrase_collocations(analysis.collocations)
 
-        if added == 0:
-            notify("片語未新增", "Anki 可能皆為重複")
-        else:
-            notify_success(f"已新增 {added} 張片語卡", preview or "（無預覽）")
-        log.info("片語完成：新增 %d 張（%s）", added, preview)
+        if added_words == 0 and added_phrases == 0:
+            notify("未新增", "可能皆已收錄或 Anki 重複")
     except Exception as e:
         log.error("片語反白流程失敗：%s", e)
         notify("片語流程失敗", str(e))
@@ -463,8 +496,10 @@ def retry_queue_phrase() -> None:
     log.info("片語佇列：發現 %d 個待重試任務…", count)
     done = phrase_queue_manager.process_queue(
         analyze_fn=analyze_image_phrases,
-        add_cards_fn=add_phrases_to_anki_results,
-        record_fn=_record_phrases_added,
+        add_phrases_fn=add_phrases_to_anki_results,
+        record_phrases_fn=_record_phrases_added,
+        add_words_fn=add_cards_to_anki_results,
+        record_words_fn=_record_added,
     )
     log.info("片語佇列：重試完成 %d/%d", done, count)
 

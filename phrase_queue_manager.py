@@ -33,7 +33,14 @@ def pending_count() -> int:
     return len(_load())
 
 
-def process_queue(analyze_fn, add_cards_fn, record_fn) -> int:
+def process_queue(
+    analyze_fn,
+    add_phrases_fn,
+    record_phrases_fn,
+    *,
+    add_words_fn=None,
+    record_words_fn=None,
+) -> int:
     tasks = _load()
     if not tasks:
         return 0
@@ -48,20 +55,40 @@ def process_queue(analyze_fn, add_cards_fn, record_fn) -> int:
             continue
 
         try:
-            phrases = analyze_fn(path)
-            if phrases:
-                phrases = phrase_history.filter_new(phrases)
+            analysis = analyze_fn(path)
+            collocations = getattr(analysis, "collocations", None)
+            chunks = getattr(analysis, "chunks", None)
+            if collocations is None and chunks is None:
+                collocations = analysis or []
+                chunks = []
 
-            if phrases:
-                results = add_cards_fn(phrases)
-                added = [p for p, r in zip(phrases, results) if r is not None]
+            collocations = phrase_history.filter_new(collocations or [])
+            if add_words_fn and record_words_fn and chunks:
+                from history_logger import filter_new as filter_new_words
+
+                chunks = filter_new_words(chunks)
+
+            did_any = False
+            if chunks and add_words_fn and record_words_fn:
+                results = add_words_fn(chunks)
+                added = [w for w, r in zip(chunks, results) if r is not None]
                 if added:
-                    record_fn(added)
-                    print(f"[片語佇列] 重試成功，新增 {len(added)} 張卡片")
-                else:
-                    print("[片語佇列] 全部為 duplicate，已移除此任務")
+                    record_words_fn(added)
+                    print(f"[片語佇列] chunk 重試成功，新增 {len(added)} 張單字卡")
+                    did_any = True
+
+            if collocations:
+                results = add_phrases_fn(collocations)
+                added = [p for p, r in zip(collocations, results) if r is not None]
+                if added:
+                    record_phrases_fn(added)
+                    print(f"[片語佇列] collocation 重試成功，新增 {len(added)} 張片語卡")
+                    did_any = True
+
+            if did_any:
+                print("[片語佇列] 重試成功，已移除此任務")
             else:
-                print("[片語佇列] 無新片語（已收錄／無合格），已移除此任務")
+                print("[片語佇列] 無新內容（已收錄／無合格），已移除此任務")
             os.unlink(path)
             success_count += 1
         except Exception as e:

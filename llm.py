@@ -7,6 +7,7 @@ import json
 import logging
 import pathlib
 import re
+from dataclasses import dataclass
 
 from google import genai
 from google.genai import types
@@ -46,26 +47,28 @@ PROMPT = """你是一位專業英文老師，專門協助學生準備 GRE / TOEF
 
 TEXT_PROMPT = """你是一位專業英文老師，專門協助學生準備 GRE / TOEFL 考試。
 
-使用者會提供一段從剪貼簿取得的文字（通常是一個英文單字，但可能包含前後空白或標點）。
+使用者會提供一段從剪貼簿取得的文字（通常是一個英文單字，但可能包含前後空白或標點；也可能是 **2～8 詞的固定整塊片語**，如 beyond reproach、on impulse、in light of）。
 
-請判斷這段文字是否是一個「單一英文單字」或可合理正規化為單一英文單字（例如去除前後空白、常見標點）。
+請判斷是否為以下之一：
+1) **單一英文單字**（可正規化，去除前後空白／標點）
+2) **固定 chunk 片語**：約 2～8 詞、作為**一整塊**記憶的慣用說法（非完整句子）。此時 `word` 欄位填**整段片語**（保留大小寫與詞序）。
 
-若不是單字（例如空字串、過長片語/句子、無法判斷），請僅回傳：{"error":"NOT_A_WORD"}
+若不是以上（例如空字串、完整長句、無法判斷），請僅回傳：{"error":"NOT_A_WORD"}
 
-若是單字，請回傳嚴格 JSON 物件，包含以下欄位：
-- "word": 單字原形（字串）
-- "phonetic": IPA 發音（字串）
+若是單字或 chunk，請回傳嚴格 JSON 物件，包含以下欄位：
+- "word": 單字原形或**整段 chunk 片語**（字串）
+- "phonetic": IPA 發音（字串；chunk 可為整段近似發音）
 - "difficulty": "GRE"、"TOEFL" 或 "Academic"（字串；整張卡共用）
-- "roots_memory": （選填，字串）**整張卡一筆**。規則同 Vision：**字根／記憶輔助**純文字；無則 `""`。**不要** HTML 或 markdown。
-- "senses": **陣列（至少 1 筆、至多 4 筆）**，每一筆代表一個**可獨立學習**的義項／常用詞性用法：
-  - "part_of_speech"、 "definition"、 "definition_zh"（中文釋義；必要時句末可括註書面／口語／正式與否等，例如「（口語常用）」）。**動詞**（含 phrasal verb）之 part_of_speech 規則同 Vision：**verb (vt)** / **verb (vi)** / **verb (vi/vt)**，片語則 **phrasal verb (vt|vi|vi/vt)**，**不可**僅輸出 "verb"
+- "roots_memory": （選填，字串）**整張卡一筆**。單字可寫字根／記憶輔助；**chunk 通常填 `""`**（勿硬拆）。**不要** HTML 或 markdown。
+- "senses": **陣列（至少 1 筆、至多 4 筆）**：
+  - "part_of_speech"、 "definition"、 "definition_zh"（中文釋義；必要時句末可括註書面／口語／正式與否等）。**動詞**（含 phrasal verb）之 part_of_speech 規則同 Vision：**verb (vt)** / **verb (vi)** / **verb (vi/vt)**。**chunk** 可用 **phrase**、**idiom** 或 **noun phrase**
   - "synonyms": 0～3（無則 []）
   - "usage_patterns": 0～4（無則 []）
-  - "example_sentence": **1～2 句**，僅對應本義項，換行 \\n 分隔；**每句**須以 **⟦** 與 **⟧** 包住目標詞或**完整片語**（與句中字形一致，含 -ed/-ing/-s；片語如 account for、accounted for 須整段一對括號內標完；規則同 Vision），每句僅一處；勿輸出 HTML
-- **多義項規則（保守）**：**預設 senses 只有 1 筆**。「足夠重要」＝須足以在 **TOEFL／IELTS**、**商用英文**或 **CEFR C2** 場景中各自獨立出現且**不拆開就容易混淆**（如專名 vs 一般義）；否則合併為 1 筆。細微差別請合併在同一義項內。
-- **熟詞僻義**：與 Vision 提示相同——常見字若另有 GRE／TOEFL **常考僻義**且與日常義易混，應**分筆 senses** 並各附例句；例如 *dispose*「清除／處置」*dispose of …* vs「使（某人）傾向於」*dispose someone to …*／*disposed to* 一系，兩義皆重要時勿併成單筆而丟僻義（至多 4 筆，排序以使用者輸入與考試重要度為準）。
-- **捨棄極冷僻義**：若某義項**僅見於古典文學／詩歌**或**極罕見**現代語境，且**不屬於 TOEFL／GRE 常考或一般學術／現代英語常用範圍**，請**直接省略**，**不要**列入 `senses`，避免增加使用者記憶負擔。
-- **順序**：`senses` 須依 **TOEFL／IELTS、商用英文、C2** 的重要性與使用頻率**由高到低**排列；senses[0] 須最符合使用者反白／輸入語境且整體最重要／最常用。
+  - "example_sentence": **1～2 句**，僅對應本義項，換行 \\n 分隔；**每句**須以 **⟦** 與 **⟧** 包住目標詞或**整段 chunk**（與句中字形一致；片語須整段一對括號內標完），每句僅一處；勿輸出 HTML
+- **多義項規則（保守）**：**預設 senses 只有 1 筆**（chunk 幾乎永遠 1 筆）。「足夠重要」＝須足以在 **TOEFL／IELTS**、**商用英文**或 **CEFR C2** 場景中各自獨立出現且**不拆開就容易混淆**；否則合併為 1 筆。
+- **熟詞僻義**：與 Vision 提示相同（單字適用；chunk 通常不拆）。
+- **捨棄極冷僻義**：若某義項**僅見於古典文學／詩歌**或**極罕見**現代語境，且**不屬於 TOEFL／GRE 常考或一般學術／現代英語常用範圍**，請**直接省略**。
+- **順序**：`senses` 須依重要性與使用頻率**由高到低**排列。
 
 只回傳 JSON，不要任何說明文字或 markdown。"""
 
@@ -497,11 +500,37 @@ _PREP_COLLLOCATION_RE = re.compile(
 
 _FORCE_COLLOCATION_RETRY_SUFFIX = """
 【強制收錄】使用者反白內容已含「實詞＋介系詞（＋受詞）」型搭配。
-你**必須**產出恰好 1 筆 phrases，**禁止**回傳 NO_WORTHY_PHRASE。
+你**必須**產出 `{"kind":"collocation","phrases":[…]}`，**禁止** NO_WORTHY_PHRASE。
 - phrase 取核心搭配（例：impervious to water → phrase 為 impervious to，不含 water）
 - Cloze **只挖介系詞等功能詞**（挖 to，不挖 impervious）
 - phrase_front 的 {{c1::…}} 後**必須**緊接 (語意錨點)，或填 semantic_anchor_zh
 """
+
+_PHRASE_ROUTE_RULES = """
+**分流（必讀）**：先判斷輸入屬於哪一類，**只回傳一種**：
+
+**A. collocation（搭配 → Cloze 片語卡）**
+- 學習目標：headword **怎麼接**介系詞／小品詞。
+- 例：*impervious to*、*account for*、*penchant for*、*detrimental to*。
+- 回傳：`{"kind":"collocation","phrases":[…]}`（格式見下）。
+
+**B. chunk（整塊片語 → 單字卡，與單字共用牌組）**
+- 學習目標：**整段說法**當一個單位記憶；拆開練單一介系詞意義不大，或整塊才是慣用義。
+- 例：*beyond reproach*、*on impulse*、*in light of*、*state of the art*、*the prospect of*、*under the provision of*。
+- 回傳：`{"kind":"chunk","word":{…}}`，`word` 物件**與單字卡 JSON 相同**（`word` 欄位填**整段片語**；`roots_memory` 通常 `""`；`senses` 通常 1 筆；`part_of_speech` 可用 phrase／idiom；例句以 ⟦整段 chunk⟧ 標示）。
+
+**判斷原則**：有明確 headword 且重點在介系詞選擇 → **collocation**；整塊才是學習單位 → **chunk**。勿把 chunk 硬塞進 Cloze。
+"""
+
+
+@dataclass
+class PhraseAnalysis:
+    collocations: list[dict]
+    chunks: list[dict]
+
+    @property
+    def has_any(self) -> bool:
+        return bool(self.collocations or self.chunks)
 
 
 def _looks_like_prep_collocation(text: str) -> bool:
@@ -556,6 +585,8 @@ def _phrase_image_prompt() -> str:
 
 **排序**：輸入語境中最突出者 ＞ 閱讀／寫作最易用錯介系詞者 ＞ 其餘常見搭配。
 
+{_PHRASE_ROUTE_RULES}
+
 **難度門檻**：排除 **CEFR A2 及以下**過於日常、無學習價值的片語（如 *tell a story*、*have breakfast*、*nice to meet you*）。**勿**僅因「只是介系詞搭配」而拒收（*impervious to*、*To my dismay* 應收錄）。排除無固定搭配關係的純文法骨架。若畫面僅有應排除者，請僅回傳：{{"error":"NO_WORTHY_PHRASE"}}。
 
 若圖片模糊、無英文、或無法辨識，請僅回傳：{{"error":"IMAGE_UNCLEAR"}}
@@ -564,20 +595,44 @@ def _phrase_image_prompt() -> str:
 
 若完全沒有可收錄的搭配，請僅回傳：{{"error":"NO_WORTHY_PHRASE"}}
 
-否則回傳嚴格 JSON（不要 markdown）：
+否則回傳嚴格 JSON（不要 markdown），擇一：
+
+collocation 範例：
 {{
+  "kind": "collocation",
   "phrases": [
     {{
-      "phrase": "canonical 片語字串（供去重），如 impervious to 或 To my dismay",
+      "phrase": "impervious to",
       "target_word": "impervious",
       "phrase_front": "The coating is impervious {{{{c1::to}}}} (對⋯免疫／不受⋯影響) water.",
       "sentence_zh": "這層塗料能防水／不受水影響。",
       "definition_zh": "簡短中文釋義",
       "usage_note": "介係詞、及物性、常見錯誤等（一句）",
-      "register_zh": "偏向書面、學術／正式寫作常見",
-      "synonyms": ["英文近義片語，0～4 個；無則 []"]
+      "register_zh": "",
+      "synonyms": []
     }}
   ]
+}}
+
+chunk 範例：
+{{
+  "kind": "chunk",
+  "word": {{
+    "word": "beyond reproach",
+    "phonetic": "bɪˈjɒnd rɪˈproʊtʃ",
+    "difficulty": "TOEFL",
+    "roots_memory": "",
+    "senses": [
+      {{
+        "part_of_speech": "phrase",
+        "definition": "so good that no criticism is possible",
+        "definition_zh": "無可指摘；完美无瑕",
+        "synonyms": [],
+        "usage_patterns": [],
+        "example_sentence": "His conduct remained ⟦beyond reproach⟧ throughout the inquiry."
+      }}
+    ]
+  }}
 }}
 
 筆數與取捨：
@@ -609,12 +664,17 @@ def _phrase_text_prompt() -> str:
 - 介系詞／to 結構（*To my dismay*、*due to*、*to some extent*）
 - 雅思／托福／GRE／商用慣用搭配（*consistent with* 等）
 
+{_PHRASE_ROUTE_RULES}
+
 **難度門檻**：排除 A2 及以下幼稚片語（*tell a story*、*nice to meet you*）。**勿**僅因「只是介系詞搭配」而拒收（*impervious to*、*account for* 必收）。若全文僅有應排除者，請僅回傳：{{"error":"NO_WORTHY_PHRASE"}}
 
 若輸入無英文，請僅回傳：{{"error":"NO_WORTHY_PHRASE"}}
 
-否則回傳嚴格 JSON（不要 markdown）：
+否則回傳嚴格 JSON（不要 markdown），擇一（見截圖版 collocation／chunk 範例）：
+
+collocation：
 {{
+  "kind": "collocation",
   "phrases": [
     {{
       "phrase": "impervious to",
@@ -627,6 +687,18 @@ def _phrase_text_prompt() -> str:
       "synonyms": []
     }}
   ]
+}}
+
+chunk：
+{{
+  "kind": "chunk",
+  "word": {{
+    "word": "beyond reproach",
+    "phonetic": "bɪˈjɒnd rɪˈproʊtʃ",
+    "difficulty": "TOEFL",
+    "roots_memory": "",
+    "senses": [{{"part_of_speech":"phrase","definition":"…","definition_zh":"無可指摘","synonyms":[],"usage_patterns":[],"example_sentence":"… ⟦beyond reproach⟧ …"}}]
+  }}
 }}
 
 筆數：
@@ -780,25 +852,50 @@ def _normalize_phrase_entry(raw: dict) -> dict | None:
     }
 
 
+def _normalize_phrase_route_payload(parsed: object) -> PhraseAnalysis:
+    if not isinstance(parsed, dict):
+        return PhraseAnalysis([], [])
+
+    err = parsed.get("error")
+    if err in ("IMAGE_UNCLEAR", "NO_WORTHY_PHRASE"):
+        log.info("片語 Gemini 回傳拒絕：%s", err)
+        return PhraseAnalysis([], [])
+
+    kind = str(parsed.get("kind", "") or "").strip().lower()
+    if kind == "chunk" or (isinstance(parsed.get("word"), dict) and not parsed.get("phrases")):
+        word_obj = parsed.get("word")
+        if isinstance(word_obj, dict):
+            chunks = _normalize_words_payload(word_obj, error_key="__no_match__")
+        else:
+            chunks = _normalize_words_payload(parsed, error_key="__no_match__")
+        if chunks:
+            log.info("片語分流：chunk → 單字卡（%s）", chunks[0].get("word"))
+        return PhraseAnalysis([], chunks)
+
+    raw_list = parsed.get("phrases")
+    if not isinstance(raw_list, list):
+        if kind == "collocation":
+            log.warning("片語 JSON kind=colocation 但缺少 phrases 陣列")
+        elif parsed.get("word"):
+            chunks = _normalize_words_payload(parsed.get("word"), error_key="__no_match__")
+            return PhraseAnalysis([], chunks)
+        else:
+            log.warning("片語 JSON 缺少 phrases 或 chunk word")
+        return PhraseAnalysis([], [])
+
+    out: list[dict] = []
+    for x in raw_list[: config.MAX_PHRASES_PER_RESPONSE]:
+        e = _normalize_phrase_entry(x) if isinstance(x, dict) else None
+        if e:
+            out.append(e)
+    if raw_list and not out:
+        log.warning("片語：Gemini 回傳 %d 筆但正規化後皆不合格", len(raw_list))
+    return PhraseAnalysis(out, [])
+
+
 def _normalize_phrases_payload(parsed: object) -> list[dict]:
-    if isinstance(parsed, dict):
-        err = parsed.get("error")
-        if err in ("IMAGE_UNCLEAR", "NO_WORTHY_PHRASE"):
-            log.info("片語 Gemini 回傳拒絕：%s", err)
-            return []
-        raw_list = parsed.get("phrases")
-        if not isinstance(raw_list, list):
-            log.warning("片語 JSON 缺少 phrases 陣列")
-            return []
-        out: list[dict] = []
-        for x in raw_list[: config.MAX_PHRASES_PER_RESPONSE]:
-            e = _normalize_phrase_entry(x) if isinstance(x, dict) else None
-            if e:
-                out.append(e)
-        if raw_list and not out:
-            log.warning("片語：Gemini 回傳 %d 筆但正規化後皆不合格", len(raw_list))
-        return out
-    return []
+    """向後相容：僅回傳 collocation 列表。"""
+    return _normalize_phrase_route_payload(parsed).collocations
 
 
 def _phrase_text_user_message(text_input: str, *, force: bool = False) -> str:
@@ -842,7 +939,7 @@ def _generate_phrase_text_response(prompt: str, user_message: str):
         raise last_err
 
 
-def _decode_phrases_response(response: object, *, context: str) -> list[dict]:
+def _decode_phrase_route_response(response: object, *, context: str) -> PhraseAnalysis:
     raw_text = str(getattr(response, "text", "") or "")
     json_text = _extract_json_text(raw_text)
     try:
@@ -852,11 +949,15 @@ def _decode_phrases_response(response: object, *, context: str) -> list[dict]:
         if raw_text.strip():
             log.error("Gemini %s 原始回應：%s", context, _clip_for_log(raw_text))
         raise
-    return _normalize_phrases_payload(parsed)
+    return _normalize_phrase_route_payload(parsed)
 
 
-def analyze_image_phrases(image_path: str) -> list[dict]:
-    """截圖 → 片語 Cloze 結構清單（0～N 筆）。"""
+def _decode_phrases_response(response: object, *, context: str) -> list[dict]:
+    return _decode_phrase_route_response(response, context=context).collocations
+
+
+def analyze_image_phrases(image_path: str) -> PhraseAnalysis:
+    """截圖 → 片語分流（Cloze 搭配 或 chunk 單字卡）。"""
     image_bytes = pathlib.Path(image_path).read_bytes()
     prompt = _phrase_image_prompt()
     global _resolved_model
@@ -901,19 +1002,19 @@ def analyze_image_phrases(image_path: str) -> list[dict]:
                 last_err = e2
         else:
             raise last_err
-    return _decode_phrases_response(response, context="phrase-image")
+    return _decode_phrase_route_response(response, context="phrase-image")
 
 
-def analyze_text_phrases(text_input: str) -> list[dict]:
-    """剪貼簿文字 → 片語 Cloze 結構清單。"""
+def analyze_text_phrases(text_input: str) -> PhraseAnalysis:
+    """剪貼簿文字 → 片語分流（Cloze 搭配 或 chunk 單字卡）。"""
     text_input = (text_input or "").strip()
     prompt = _phrase_text_prompt()
     user_message = _phrase_text_user_message(text_input)
     response = _generate_phrase_text_response(prompt, user_message)
-    result = _decode_phrases_response(response, context="phrase-text")
-    if not result and _looks_like_prep_collocation(text_input):
+    result = _decode_phrase_route_response(response, context="phrase-text")
+    if not result.has_any and _looks_like_prep_collocation(text_input):
         log.info("片語：首次無結果，疑似「實詞＋介系詞」片段，強制收錄重試…")
         retry_message = _phrase_text_user_message(text_input, force=True)
         response = _generate_phrase_text_response(prompt, retry_message)
-        result = _decode_phrases_response(response, context="phrase-text-retry")
+        result = _decode_phrase_route_response(response, context="phrase-text-retry")
     return result
