@@ -58,7 +58,7 @@ macOS 全域工具：
 - 角色：專業英文老師（GRE/TOEFL）。
 - 輸入：使用者反白並複製到剪貼簿的文字（通常是一個單字，可能包含標點或前後空白；亦可能是 **2～8 詞的固定整塊片語 chunk**）。
 - 任務：若輸入為**單一英文單字**、可正規化為單字、或為**值得收錄的固定片語 chunk**（整段作為一個學習單位，如 *beyond reproach*、*on impulse*），產生 1 筆單字卡資料；`word` 欄位填單字或**整段 chunk**。
-- 正常輸出：嚴格 JSON 物件（同單字卡欄位結構：`word`, `phonetic`, `difficulty`、選填 **`roots_memory`**、`senses[]`（內含每義項之 `part_of_speech`, `definition`, `definition_zh`, `example_sentence`, `synonyms`, `usage_patterns` 等））。Chunk 時 `roots_memory` 通常為 `""`；`part_of_speech` 可用 `phrase`／`idiom`；例句以 **⟦整段 chunk⟧** 標示。
+- 正常輸出：嚴格 JSON 物件（同單字卡欄位結構：`word`, `phonetic`, `difficulty`、選填 **`roots_memory`**、`senses[]`（內含每義項之 `part_of_speech`, `definition`, `definition_zh`, `example_sentence`, `synonyms`, `usage_patterns` 等））。`definition_zh` 須為**直覺中文對應詞**（具體名詞如 *pigeon* →「鴿子」），**不得**直譯英文 `definition`。Chunk 時 `roots_memory` 通常為 `""`；`part_of_speech` 可用 `phrase`／`idiom`；例句以 **⟦整段 chunk⟧** 標示。
 - 例句要求：需符合 GRE/TOEFL 學術難度，且需提供 **2 句**（用同一個欄位承載，建議以換行 `\n` 分隔兩句）。
 - 常用用法要求：需提供常見搭配（特別是介系詞搭配），例如 `interested in`, `capable of`, `apply for`。
 - 異常輸出：
@@ -241,6 +241,7 @@ macOS 全域工具：
 - 每筆物件含：
   - **`part_of_speech`（必填）**：非動詞類沿用慣用英文（如 `noun`、`adjective`、`proper noun`）。**動詞**（含一般動詞與片語動詞）：**必須**標明及物性，**不得**僅輸出 `verb`；格式為 **`verb (vt)`**、**`verb (vi)`** 或 **`verb (vi/vt)`**（括號內表及物／不及物／兼用；兼用時建議寫成 `vi/vt`）。片語動詞則為 **`phrasal verb (vt)`**、**`phrasal verb (vi)`**、**`phrasal verb (vi/vt)`**（全小寫，括號前後空格可省略但建議 `verb (vi)` 有一空格）。
   - `definition`、`definition_zh`（必填，精簡）
+  - **`definition_zh` 直覺譯詞（必填行為）**：`definition_zh` 須為學習者**一眼能對上英文單字**的**中文對應詞或極短釋義**（如同雙語字典／單字卡背面），**不得**把 `definition` 英文釋義逐句翻成中文。**具體名詞**（動物、植物、食物、器物、職業、地點等日常可指稱之物）應直接給**慣用中文名詞**（例如 *pigeon* →「鴿子」，*apple* →「蘋果」），**禁止**寫成百科式描述（例如「一種體型豐滿…的鳥類」）。形容詞／動詞／抽象名詞則用**簡短詞組**（多義以分號分隔），勿寫完整定義句。詳細英文說明只放在 `definition` 欄位。
   - **`definition_zh` 語體／場景括註（選填）**：當該義項在**書面 vs 口語**、**正式 vs 非正式**、**學術 vs 日常／商務**等維度上有助學習者判斷「此義多常出現於何類情境」時，可在中文釋義**結尾**以括號簡短加註（例如「（書面／學術較常）」「（口語常用）」「（正式場合較常）」）。若各維度差異不大、加註無增益或會變冗長，則**省略**。
   - `synonyms`：0～3（選填）
   - `usage_patterns`：0～4（選填，規則同「常用用法」）
@@ -257,6 +258,7 @@ macOS 全域工具：
 - **AC6**：模型不得輸出「僅古典／極罕見且非 TOEFL／GRE 常考」的義項至 `senses`（應直接捨棄）。
 - **AC7**：凡 `senses` 中詞性為**動詞**（含片語動詞）者，`part_of_speech` 須符合上列 **`verb (vt|vi|vi/vt)`** 括號格式（片語則 `phrasal verb (...)`）；通知預覽之詞性縮寫應能對應顯示為 `vt.`／`vi.`／`vi./vt.`（片語加 `phr.`）。
 - **AC8**（熟詞僻義）：當單字同時具備「明顯日常義」與「GRE／TOEFL 常考僻義」且符合拆分原則時，模型輸出之 `senses` 須**涵蓋該僻義**（獨立一筆或與其他考點分筆），且排序須以**畫面／輸入語境與考試重要度**為準；**不得**僅剩單一日常釋義而遺漏常考僻義（在筆數上限內）。
+- **AC9**（直覺中文）：具體名詞之 `definition_zh` 須為慣用中文詞（如 *pigeon* →「鴿子」），**不得**為英文 `definition` 的中文直譯或百科式長句描述。
 
 ## 需求：本地單字資料目錄（與 Anki 並行）
 ### 目標

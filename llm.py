@@ -33,8 +33,8 @@ PROMPT = """你是一位專業英文老師，專門協助學生準備 GRE / TOEF
 - "roots_memory": （選填，字串）**整張卡一筆**，置於卡片層級、與多義項無關。可寫**字首／字根／字尾**簡短拆解 + 一段中文**記憶點**或場景聯想（可換行，純文字）。若**無明確拆解**、或**硬拆反而誤導**則必須 `""`。**不要** HTML 或 markdown。
 - "senses": **陣列（至少 1 筆、至多 4 筆）**，每一筆代表一個**可獨立學習**的義項／常用詞性用法：
   - "part_of_speech": 非動詞如 noun / adjective / proper noun（字串）。**動詞**（含 phrasal verb）**必須**標及物性，**不得**只寫 verb：格式為 "verb (vt)"、"verb (vi)" 或 "verb (vi/vt)"（兼及物與不及物時；括號內全小寫）。片語動詞為 "phrasal verb (vt)"、"phrasal verb (vi)"、"phrasal verb (vi/vt)"（擇一）
-  - "definition": 英文定義，簡潔明確（字串）
-  - "definition_zh": 中文定義（字串）。若該義在**書面／口語**或**正式／非正式**（含學術、商務、日常）上對「使用頻率或場景」有辨識幫助，可在**句末**括註簡短提示（例如「（書面較常）」「（口語常用）」「（正式場合較常）」）；無增益則不加
+  - "definition": 英文定義，簡潔明確（字串；可含必要描述）
+  - "definition_zh": **直覺中文對應詞或極短釋義**（字串），如同雙語字典／單字卡背面——學習者一眼能對上英文單字。**禁止**把 `definition` 英文釋義逐句翻成中文。**具體名詞**（動物、植物、食物、器物、職業、地點等）須直接給**慣用中文名詞**（例：pigeon →「鴿子」、apple →「蘋果」），**勿**寫百科式描述（反例：「一種體型豐滿…的鳥類」）。形容詞／動詞／抽象名詞用**簡短詞組**（多義以分號分隔），勿寫完整定義句。若該義在**書面／口語**或**正式／非正式**上有辨識幫助，可在**句末**括註（例「（書面較常）」）；無增益則不加
   - "synonyms": 0～3 個同義詞（字串陣列；無則 []）
   - "usage_patterns": 高訊號搭配（字串陣列，0～4 筆；不要硬湊；無則 []）
   - "example_sentence": **1～2 句**英文例句，**只許對應本義項**，用換行 \\n 分隔；勿把其他義項混進同一句。**每句**須以 **⟦** 與 **⟧**（U+27E6、U+27E7）包住該句中的**目標單字或連續片語**；括號內必須與句中**逐字連續**一致，且含**所有曲折**：過去式／分詞的 **-ed**、**-ing**、**-s** 等皆不可漏（例如句中是 accounted 就標 ⟦accounted⟧ 或與後續介詞連用則 ⟦accounted for⟧，勿只標 account）。**常用片語**（如 *account for*）須**整段**一併包在同一對 ⟦⟧ 內（例：These factors do not fully ⟦account for⟧ the phenomenon.）；過去式則 ⟦accounted for⟧ 等。**每句僅一處**一對 ⟦⟧。除 ⟦⟧ 外**不要**輸出任何 HTML 或 markdown
@@ -61,7 +61,7 @@ TEXT_PROMPT = """你是一位專業英文老師，專門協助學生準備 GRE /
 - "difficulty": "GRE"、"TOEFL" 或 "Academic"（字串；整張卡共用）
 - "roots_memory": （選填，字串）**整張卡一筆**。單字可寫字根／記憶輔助；**chunk 通常填 `""`**（勿硬拆）。**不要** HTML 或 markdown。
 - "senses": **陣列（至少 1 筆、至多 4 筆）**：
-  - "part_of_speech"、 "definition"、 "definition_zh"（中文釋義；必要時句末可括註書面／口語／正式與否等）。**動詞**（含 phrasal verb）之 part_of_speech 規則同 Vision：**verb (vt)** / **verb (vi)** / **verb (vi/vt)**。**chunk** 可用 **phrase**、**idiom** 或 **noun phrase**
+  - "part_of_speech"、 "definition"、 "definition_zh"（**直覺中文對應詞**；規則同 Vision：`definition_zh` **禁止**直譯 `definition`；具體名詞直接給慣用中文名詞如 pigeon→「鴿子」；必要時句末可括註書面／口語／正式與否）。**動詞**（含 phrasal verb）之 part_of_speech 規則同 Vision：**verb (vt)** / **verb (vi)** / **verb (vi/vt)**。**chunk** 可用 **phrase**、**idiom** 或 **noun phrase**
   - "synonyms": 0～3（無則 []）
   - "usage_patterns": 0～4（無則 []）
   - "example_sentence": **1～2 句**，僅對應本義項，換行 \\n 分隔；**每句**須以 **⟦** 與 **⟧** 包住目標詞或**整段 chunk**（與句中字形一致；片語須整段一對括號內標完），每句僅一處；勿輸出 HTML
