@@ -66,6 +66,19 @@ def _invoke(action: str, **params) -> object:
     return result["result"]
 
 
+def check_connectivity() -> object:
+    """
+    確認 AnkiConnect 可連線；成功時回傳 version 結果。
+    無法連線或 API 錯誤時拋出例外。
+    """
+    try:
+        return _invoke("version")
+    except requests.RequestException as e:
+        raise ConnectionError(
+            f"無法連線 AnkiConnect（{config.ANKI_CONNECT_URL}）"
+        ) from e
+
+
 def ensure_deck_exists(deck_name: str) -> None:
     _invoke("createDeck", deck=deck_name)
 

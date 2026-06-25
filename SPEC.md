@@ -418,6 +418,24 @@
 
 ---
 
+## 需求：啟動時 AnkiConnect 連線檢查
+
+### 背景
+- 若 Anki 未開啟或 AnkiConnect 未啟用，使用者仍可使用快捷鍵觸發流程，易造成「已分析／已去重」但卡片未寫入 Anki 的困惑。
+- 啟動時先確認 AnkiConnect 可連線，失敗則**立即結束程式**，不進入熱鍵監聽與佇列重試。
+
+### 行為
+- **`main.py` 進入點**（含 `--test`）在執行截圖／熱鍵監聽／佇列重試前，呼叫 AnkiConnect `version`（或等效健康檢查）。
+- 連線失敗：於 stderr 輸出明確錯誤（含 `ANKI_CONNECT_URL`），`sys.exit(1)`。
+- 連線成功：記錄 log（含 AnkiConnect 版本）後繼續原有流程。
+
+### 驗收條件
+- **AC1**：Anki 未開啟時執行 `python main.py`，程式應立即退出且 exit code 為 1，不註冊熱鍵。
+- **AC2**：Anki 與 AnkiConnect 正常時，行為與改動前相同（可啟動監聽並重試佇列）。
+- **AC3**：`python main.py --test` 在 AnkiConnect 不可用時亦應退出，不進入截圖流程。
+
+---
+
 ## 環境配置 (`setup.sh`)
 - 自動建立 `.venv`。
 - 安裝 `requirements.txt`。

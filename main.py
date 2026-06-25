@@ -26,7 +26,7 @@ import phrase_queue_manager
 import platform_util
 import queue_manager
 import word_archive
-from anki import add_cards_to_anki_results, add_phrases_to_anki_results
+from anki import add_cards_to_anki_results, add_phrases_to_anki_results, check_connectivity
 from llm import (
     analyze_image,
     analyze_image_phrases,
@@ -589,15 +589,31 @@ def _run_hotkey_listener(hotkeys: list[keyboard.HotKey]) -> None:
     listener.join()
 
 
+def _require_anki_connect() -> None:
+    try:
+        version = check_connectivity()
+        log.info("AnkiConnect 已連線（version %s）", version)
+    except Exception as e:
+        print(
+            f"錯誤：無法連線 AnkiConnect（{config.ANKI_CONNECT_URL}）。"
+            "請確認 Anki 已開啟且已安裝 AnkiConnect 外掛。",
+            file=sys.stderr,
+        )
+        log.error("AnkiConnect 連線失敗：%s", e)
+        sys.exit(1)
+
+
 def main() -> None:
+    if not config.GEMINI_API_KEY:
+        print("錯誤：請先設定 GEMINI_API_KEY 環境變數（或在 .env 填入）", file=sys.stderr)
+        sys.exit(1)
+
+    _require_anki_connect()
+
     if "--test" in sys.argv:
         print("[測試模式] 立即觸發一次截圖")
         process_screenshot()
         return
-
-    if not config.GEMINI_API_KEY:
-        print("錯誤：請先設定 GEMINI_API_KEY 環境變數（或在 .env 填入）", file=sys.stderr)
-        sys.exit(1)
 
     # 啟動時先重試離線佇列
     retry_queue()
