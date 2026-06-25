@@ -5,7 +5,7 @@
 
 ## 專案目標
 英文單字卡搜集工具。
-macOS 全域工具：
+桌面全域工具（**macOS / Windows**；快捷鍵由 `.env` 自訂）：
 - 快捷鍵截圖 -> Gemini Vision 辨識 -> Anki 自動製單字卡
 - 反白 + 快捷鍵 -> 剪貼簿攔截 -> Gemini Text 生成 -> Anki 自動製單字卡
 具備錯誤容忍機制與自動清理功能。
@@ -36,12 +36,10 @@ macOS 全域工具：
 6. **`phrase_history.py`** / **`phrase_archive.py`** / **`phrase_queue_manager.py`**:
    - 片語 Cloze：依 **`ANKI_PHRASE_DECK_NAME`** 計算 **`PHRASE_DECK_SLUG`**，記錄 **`phrase_history/<slug>.json`**（與單字 **`word_history/<slug>.json`** 分開目錄）、封存 **`vocabulary_phrases/<slug>/`**；失敗時 **`pending_tasks_phrases.json`**（與單字 **`pending_tasks.json`** 分離）。
 7. **`main.py`**:
-   - 監聽快捷鍵：
-     - 截圖模式：`<cmd>+<ctrl>+s`
-     - 反白取詞模式（剪貼簿攔截）：預設 `Ctrl+C`（可透過 `.env` 覆寫）
-   - 觸發 `screencapture -i` 存至 `captures/` 目錄。
+   - 監聽快捷鍵（格式與預設值見 `config.py`／`.env`，由使用者自行設定）。
+   - 觸發跨平台截圖（見「需求：跨平台截圖與反白複製」）存至 `captures/` 目錄。
    - 整合 Gemini Vision API。
-   - 反白取詞模式：模擬 `Cmd+C` 將反白文字送入剪貼簿 → 讀取文字 → 還原剪貼簿 → 呼叫 Gemini 產生單字卡 JSON。
+   - 反白取詞模式：依平台模擬 **⌘+C（macOS）** 或 **Ctrl+C（Windows）** 將反白文字送入剪貼簿 → 讀取文字 → 還原剪貼簿 → 呼叫 Gemini 產生單字卡 JSON。
    - **Cleanup**: 成功匯入 Anki 後，自動刪除 `captures/` 中對應的圖片檔案。
    - **本地單字庫**：成功寫入 Anki 後，同步寫入 `word_archive`（見下方需求）。
 
@@ -67,12 +65,12 @@ macOS 全域工具：
 
 ## 需求：反白取詞（剪貼簿攔截）作為第二種輸入方式
 ### 背景
-- macOS 沙盒/權限限制下，Python 無法直接取得其他應用程式目前反白的文字。
-- 實務採用「剪貼簿攔截法（Clipboard Interception）」：用程式模擬 `Cmd+C`，再從剪貼簿取值。
+- 作業系統沙盒／權限限制下，Python 無法直接取得其他應用程式目前反白的文字。
+- 實務採用「剪貼簿攔截法（Clipboard Interception）」：程式收到自訂熱鍵後，模擬系統複製快捷鍵（macOS：`Cmd+C`；Windows：`Ctrl+C`），再從剪貼簿取值。
 
 ### 流程
-- **觸發**：使用者反白文字後按 `Ctrl+C`。
-- **模擬拷貝**：程式收到快捷鍵後，立即模擬按下 `Cmd+C`。
+- **觸發**：使用者反白文字後按 `.env` 設定的反白熱鍵（預設 macOS 為 `Ctrl+C`）。
+- **模擬拷貝**：程式收到快捷鍵後，立即模擬按下平台對應的複製組合鍵。
 - **讀取與還原**：
   - 先保存原剪貼簿內容
   - 讀取新的剪貼簿文字
@@ -81,8 +79,8 @@ macOS 全域工具：
 - **寫入 Anki**：與截圖模式共用同一套去重/歷史/Anki 寫入規則。
 
 ### 非功能需求
-- **安全性/權限提示**：若因 macOS 權限導致無法攔截快捷鍵/模擬按鍵，需在終端與通知中提示使用者到「系統設定 → 隱私權與安全性 → 輔助使用」開啟權限。
-- **延遲控制**：模擬 `Cmd+C` 後需等待極短時間（例如 50–150ms）再讀剪貼簿，降低讀到舊值的機率。
+- **安全性/權限提示**：若因權限導致無法攔截快捷鍵／模擬按鍵，需在終端與通知中提示對應平台設定（macOS：輔助使用；Windows：以系統管理員執行或允許鍵盤 hook）。
+- **延遲控制**：模擬複製後需等待極短時間（例如 50–150ms）再讀剪貼簿，降低讀到舊值的機率。
 - **監聽相容性**：熱鍵監聽需採用與目前 `pynput` 版本相容的實作，避免 `GlobalHotKeys._on_press()` 參數簽名不一致造成 listener callback crash。
 
 ### 驗收條件
@@ -394,6 +392,29 @@ macOS 全域工具：
 - **AC8**（反白短片段）：反白 *impervious to water* 時應產出片語卡（`phrase` 為 *impervious to*，Cloze 挖 `to`），不得回傳「未找到值得收錄的搭配」。
 - **AC9**（正面目標單字）：*impervious to* 等搭配之正面最上方可見 **impervious**，字級／粗體／置中與單字卡 `Front` 第一行一致；其下有一條水平分隔線後才是 Cloze 題幹；*To my dismay* 等無核心實詞者不出現目標單字列與該分隔線。
 - **AC10**（Chunk 分流）：片語快捷鍵反白 *beyond reproach* 等整塊片語時，應產出**單字卡**（`word` 為整段片語）進 **`ANKI_DECK_NAME`**，**不**進 Cloze 片語牌組；*impervious to* 仍進 Cloze 牌組。
+
+---
+
+## 需求：跨平台截圖與反白複製
+
+### 背景
+- 截圖與反白取詞為核心輸入；原先僅支援 macOS（`screencapture`、`Cmd+C`）。
+- Windows 需對等行為，快捷鍵預設值仍由 `.env` 自訂，本需求不變更熱鍵預設；音效／通知維持現狀（macOS 專用實作可保留）。
+
+### 截圖（`screenshot.py`）
+- **macOS**：維持 `screencapture -i` 互動框選。
+- **Windows（及其他非 macOS）**：以全螢幕半透明 overlay（tkinter）拖曳框選區域，再以 Pillow `ImageGrab` 擷取並存成 PNG；**Esc** 或過小選區視為取消。
+- 因熱鍵 callback 在背景執行緒，Windows 框選須在**獨立子行程**執行（避免 tkinter 非主執行緒限制）。
+- 輸出路徑與檔名規則不變：`captures/capture_<timestamp>.png`；失敗或取消回傳 `None`。
+
+### 反白複製（`main.py`）
+- 模擬複製時依平台使用修飾鍵：**macOS `Key.cmd`**、**Windows `Key.ctrl`**（其餘平台同 Windows）。
+- 權限失敗通知文案依平台提示（macOS 輔助使用／Windows 管理員或鍵盤 hook）。
+
+### 驗收條件
+- **AC1**（Windows 截圖）：`python main.py --test` 可開啟框選 overlay，選取區域後產生 `captures/*.png` 並進入 Gemini 流程（或取消時不產檔）。
+- **AC2**（Windows 反白）：反白文字並觸發反白熱鍵後，剪貼簿攔截能取得選取文字（模擬 Ctrl+C，非 Win 鍵）。
+- **AC3**（macOS 相容）：既有 `screencapture` 與 `Cmd+C` 行為不變。
 
 ---
 

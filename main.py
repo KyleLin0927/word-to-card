@@ -14,7 +14,7 @@ import threading
 import time
 
 from pynput import keyboard
-from pynput.keyboard import Controller, Key
+from pynput.keyboard import Controller
 
 import pyperclip
 
@@ -23,6 +23,7 @@ import history_logger
 import phrase_archive
 import phrase_history
 import phrase_queue_manager
+import platform_util
 import queue_manager
 import word_archive
 from anki import add_cards_to_anki_results, add_phrases_to_anki_results
@@ -234,11 +235,11 @@ def _copy_selection_to_clipboard(wait_ms: int = 120) -> tuple[str, str]:
     """
     previous = pyperclip.paste()
 
-    # 模擬 Cmd+C
-    _kb.press(Key.cmd)
+    modifier = platform_util.copy_modifier_key()
+    _kb.press(modifier)
     _kb.press("c")
     _kb.release("c")
-    _kb.release(Key.cmd)
+    _kb.release(modifier)
 
     # 等待剪貼簿更新（並做簡單輪詢避免讀到舊值）
     deadline = time.time() + (wait_ms / 1000.0)
@@ -259,7 +260,7 @@ def process_selection() -> None:
         previous, selected = _copy_selection_to_clipboard()
     except Exception as e:
         log.error("無法模擬拷貝或讀取剪貼簿：%s", e)
-        notify("取詞失敗", "請到 系統設定→隱私權與安全性→輔助使用 開啟權限")
+        notify("取詞失敗", platform_util.input_permission_hint())
         return
 
     try:
@@ -427,7 +428,7 @@ def process_selection_phrase() -> None:
         previous, selected = _copy_selection_to_clipboard()
     except Exception as e:
         log.error("片語：無法讀取剪貼簿：%s", e)
-        notify("取詞失敗", "請到 系統設定→隱私權與安全性→輔助使用 開啟權限")
+        notify("取詞失敗", platform_util.input_permission_hint())
         return
 
     try:
