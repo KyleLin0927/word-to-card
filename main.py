@@ -13,6 +13,14 @@ import sys
 import threading
 import time
 
+from _version import __version__
+
+# `--version` / `-V`：在載入任何第三方套件或開啟顯示器之前就回應，
+# 確保打包後的執行檔在任何環境（含無顯示器、無 .env）都能查版本。
+if "--version" in sys.argv or "-V" in sys.argv:
+    print(__version__)
+    sys.exit(0)
+
 from pynput import keyboard
 from pynput.keyboard import Controller
 
@@ -620,7 +628,7 @@ def main() -> None:
     retry_queue()
     retry_queue_phrase()
 
-    log.info("=== Word to Card 已啟動 ===")
+    log.info("=== Word to Card v%s 已啟動 ===", __version__)
     log.info("快捷鍵（截圖）：%s", config.HOTKEY_SCREENSHOT_DISPLAY)
     log.info("快捷鍵（截圖—片語）：%s", config.HOTKEY_SCREENSHOT_PHRASE_DISPLAY)
     log.info("快捷鍵（反白取詞）：%s", config.HOTKEY_SELECTIONS_DISPLAY)

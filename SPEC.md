@@ -497,3 +497,19 @@
 - **AC4**（CI 發布）：推送 `v*` tag 後，Actions 於 4 個 target 完成打包，並把 4 個對應命名的執行檔上傳至同名 Release。
 - **AC5**（依賴完整）：打包後的執行檔能正確載入 `google.genai`／`edge_tts`／`pynput` 等套件；在缺少 `GEMINI_API_KEY` 時仍能啟動並印出明確錯誤後以 exit code 1 結束（非 `ModuleNotFoundError`）。
 - **AC6**（macOS 相容）：既有 macOS 從原始碼執行（`python main.py`）行為不變。
+
+---
+
+## 需求：版本號 `__version__`
+
+### 背景
+- 發版（tag）前需有單一版本來源，並讓使用者能查詢執行檔版本。
+
+### 行為
+- `_version.py` 提供唯一的 `__version__`（single source of truth）；發版時改它、commit 後再 tag。
+- `main.py` 支援 `--version` / `-V`：在載入第三方套件與開啟顯示器之前即印出版本並 `exit 0`，不需 `.env` 或 Anki。
+- 啟動 log banner 顯示版本：`=== Word to Card vX.Y.Z 已啟動 ===`。
+
+### 驗收條件
+- **AC1**：`word-to-card --version`（與 `-V`）印出版本號（如 `0.1.0`）並 `exit 0`，無需 `.env`／Anki／顯示器。
+- **AC2**：正常啟動時 log banner 顯示版本號。
