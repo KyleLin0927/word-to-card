@@ -1,0 +1,100 @@
+name: Build and Release
+
+# 推送 v* tag 時：四平台打包 + 建立 GitHub Release
+# 手動觸發（workflow_dispatch）時：只打包並上傳 artifact，不建立 Release
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write # 建立 / 更新 Release 需要
+
+jobs:
+  build:
+    name: Build (${{ matrix.asset }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest # Windows x64
+            asset: word-to-card-windows-x64.exe
+            bin: word-to-card.exe
+          - os: macos-latest # macOS Apple Silicon (arm64)
+            asset: word-to-card-macos-arm64
+            bin: word-to-card
+          - os: macos-13 # macOS Intel (x86_64)
+            asset: word-to-card-macos-x64
+            bin: word-to-card
+          - os: ubuntu-latest # Linux x64
+            asset: word-to-card-linux-x64
+            bin: word-to-card
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Verify tkinter is available (screenshot overlay needs it on Windows/Linux)
+        run: python -c "import tkinter; print('tkinter OK, Tk', tkinter.TkVersion)"
+
+      - name: Build executable
+        run: pyinstaller word-to-card.spec
+
+      - name: Stage artifact
+        shell: bash
+        run: |
+          mkdir -p out
+          cp "dist/${{ matrix.bin }}" "out/${{ matrix.asset }}"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: out/${{ matrix.asset }}
+          if-no-files-found: error
+
+  release:
+    name: Publish Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publish to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          body: |
+            ## 下載說明
+
+            | 平台 | 架構 | 檔案 |
+            |------|------|------|
+            | Windows | x64 | `word-to-card-windows-x64.exe` |
+            | macOS | Apple Silicon | `word-to-card-macos-arm64` |
+            | macOS | Intel | `word-to-card-macos-x64` |
+            | Linux | x64 | `word-to-card-linux-x64` |
+
+            ### 使用前準備
+            1. 在**執行檔同層**放一個 `.env`，至少填入 `GEMINI_API_KEY`（格式見 `.env.example`）。
+               - 資料（單字庫、歷史、log、截圖）預設也寫在執行檔同層；可用 `.env` 的 `W2C_DATA_DIR` 改到別處。
+            2. 先開啟 **Anki** 並安裝 **AnkiConnect** 外掛（代號 `2055492159`）。
+
+            > **macOS 為未簽章檔**，首次開啟若出現「無法驗證開發者」：
+            > 在終端機執行 `xattr -c <檔名>` 後 `chmod +x <檔名>` 再執行，
+            > 或到「系統設定 → 隱私權與安全性」按「仍要開啟」。

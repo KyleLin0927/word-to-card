@@ -105,12 +105,23 @@ def _interactive_region_capture(path: str) -> bool:
     return os.path.exists(path) and os.path.getsize(path) > 0
 
 
+def interactive_region_capture(path: str) -> bool:
+    """
+    公開包裝：在目前（主）執行緒做全螢幕框選並存檔。
+    供凍結後的 main.py `--capture` 進入點呼叫。
+    """
+    return _interactive_region_capture(path)
+
+
 def _take_screenshot_interactive_subprocess(path: str) -> bool:
     """在子行程執行 tkinter 框選（供背景執行緒的熱鍵 callback 使用）。"""
-    result = subprocess.run(
-        [sys.executable, __file__, "--capture", path],
-        capture_output=True,
-    )
+    if getattr(sys, "frozen", False):
+        # 凍結／onefile：以執行檔自身重新叫起；進入點 main.py 會攔截 --capture。
+        cmd = [sys.executable, "--capture", path]
+    else:
+        # 開發：用 python 執行 screenshot.py，本檔 __main__ 會處理 --capture。
+        cmd = [sys.executable, os.path.abspath(__file__), "--capture", path]
+    result = subprocess.run(cmd, capture_output=True)
     return result.returncode == 0
 
 

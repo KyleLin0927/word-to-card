@@ -15,7 +15,10 @@ from google.genai import types
 import config
 import history_logger
 
-_client = genai.Client(api_key=config.GEMINI_API_KEY)
+# 僅在有金鑰時建立 client：新版 google-genai 在無金鑰時會於建構即丟出 ValueError，
+# 會蓋掉 main() 中「請設定 GEMINI_API_KEY」的友善提示（打包成 exe 後尤其明顯）。
+# 無金鑰時設為 None；此時 main() 會先行檢查並結束，不會用到 _client。
+_client = genai.Client(api_key=config.GEMINI_API_KEY) if config.GEMINI_API_KEY else None
 _resolved_model: str | None = None
 log = logging.getLogger(__name__)
 

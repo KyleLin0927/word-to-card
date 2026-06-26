@@ -55,7 +55,8 @@ def _record_phrases_added(phrases: list[dict]) -> None:
 
 
 # ── Logging 設定 ──────────────────────────────────────────
-_LOG_FILE = os.path.join(os.path.dirname(__file__), "word_to_card.log")
+# log 路徑由 config 統一管理（凍結後寫在執行檔同層／DATA_DIR，而非暫時解壓目錄）
+_LOG_FILE = config.LOG_FILE
 
 logging.basicConfig(
     level=logging.INFO,
@@ -655,4 +656,12 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # 凍結／onefile：截圖框選子行程入口。
+    # 必須在任何 GEMINI_API_KEY／AnkiConnect 檢查之前處理，
+    # 因為框選子行程由 screenshot.py 以 `<執行檔> --capture <輸出路徑>` 叫起，
+    # 不需要也不應觸發那些檢查。
+    if len(sys.argv) >= 3 and sys.argv[1] == "--capture":
+        from screenshot import interactive_region_capture
+
+        sys.exit(0 if interactive_region_capture(sys.argv[2]) else 1)
     main()

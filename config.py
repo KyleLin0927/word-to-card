@@ -1,14 +1,46 @@
 import os
 import re
+import sys
 from dotenv import load_dotenv
 
+# ── 應用程式目錄（APP_DIR）與資料目錄（DATA_DIR）──────────────────
+# PyInstaller --onefile 執行時 __file__ 會指向暫時解壓目錄（sys._MEIPASS），
+# 程式結束即被刪除；因此凍結時改以「執行檔所在目錄」為基準，
+# 讓 .env 與所有可寫資料都落在執行檔旁（或 W2C_DATA_DIR 指定處）。
+if getattr(sys, "frozen", False):
+    APP_DIR = os.path.dirname(os.path.abspath(sys.executable))
+else:
+    APP_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# .env 一律從執行檔／原始碼同層載入（找不到也不報錯）；
+# 再以無參數 load_dotenv() 相容「從專案目錄啟動」的情況（不覆寫已載入值）。
+load_dotenv(os.path.join(APP_DIR, ".env"))
 load_dotenv()
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 ANKI_CONNECT_URL = os.environ.get("ANKI_CONNECT_URL", "http://localhost:8765")
 ANKI_DECK_NAME = os.environ.get("ANKI_DECK_NAME", "Vocabulary::WordToCard")
 
-_base_dir = os.path.dirname(__file__)
+# 可寫資料根目錄：預設執行檔同層（可攜式）；可用環境變數／.env 的 W2C_DATA_DIR 覆寫。
+# 支援 ~ 與相對路徑（相對於 APP_DIR）。
+_data_override = os.environ.get("W2C_DATA_DIR", "").strip()
+if _data_override:
+    _data_override = os.path.expanduser(_data_override)
+    DATA_DIR = (
+        _data_override
+        if os.path.isabs(_data_override)
+        else os.path.join(APP_DIR, _data_override)
+    )
+else:
+    DATA_DIR = APP_DIR
+DATA_DIR = os.path.abspath(DATA_DIR)
+os.makedirs(DATA_DIR, exist_ok=True)
+
+# 既有程式碼以 _base_dir 推導各資料路徑；統一指向 DATA_DIR。
+_base_dir = DATA_DIR
+
+# 集中式 log 檔（main.py 使用）
+LOG_FILE = os.path.join(DATA_DIR, "word_to_card.log")
 
 
 def _deck_slug(anki_deck_name: str) -> str:

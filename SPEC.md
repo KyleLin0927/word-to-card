@@ -442,3 +442,58 @@
 - 建立 `captures/` 暫存目錄。
 - 建立 `vocabulary/`、`word_history/` 目錄（本地單字封存與去重歷史使用；執行時亦會依牌組自動建立子目錄／分檔）。
 - （片語功能）建立 **`phrase_history/`**、**`vocabulary_phrases/`**（執行時依片語牌組 slug 分檔／子路徑）。
+
+---
+
+## 需求：跨平台打包與 GitHub Actions 自動發布
+
+### 背景
+- 目前需先安裝 Python／`.venv` 才能啟動，難以在其他電腦「一鍵啟動」。
+- 目標：用 **PyInstaller** 打包成各平台單一可執行檔（onefile），並透過 **GitHub Actions** 在 Windows／macOS／Linux 上自動打包、發布到 GitHub Release。
+- 本需求**只處理打包**與打包後必要的修正；非 macOS 的執行細節（如桌面通知改用 osascript／afplay 僅 macOS 有效）暫不在此需求範圍。
+
+### 技術棧補充
+- **Packaging**: PyInstaller（onefile、console 模式），打包設定維護於版本控管的 `word-to-card.spec`。
+- **CI/CD**: GitHub Actions（`.github/workflows/release.yml`）。
+
+### 設計決策
+
+**1. 凍結（frozen）路徑與 `.env` 載入（`config.py`）**
+- 新增 `APP_DIR`：凍結時為「執行檔所在目錄」（`os.path.dirname(sys.executable)`）；開發時為「原始碼目錄」。
+  - 理由：PyInstaller `--onefile` 執行時 `__file__` 指向暫時解壓目錄（`sys._MEIPASS`），程式結束即刪除；若資料寫在那裡會每次遺失，`.env` 也讀不到。
+- `.env` 一律從 `APP_DIR` 載入（凍結後即「執行檔同層的 `.env`」）。
+- 新增 `DATA_DIR`（所有可寫資料的根目錄）：
+  - 預設 = `APP_DIR`（可攜式：資料放在執行檔旁）。
+  - 可用環境變數或 `.env` 的 **`W2C_DATA_DIR`** 覆寫（支援 `~` 與相對路徑；相對於 `APP_DIR`）。
+  - 此即「簡單但可由使用者設定、暫不做 GUI」的方案；未來要加圖形化設定可在此基礎上擴充。
+- `captures/`、`vocabulary/`、`word_history/`、`phrase_history/`、`vocabulary_phrases/`、`pending_tasks*.json`、log 全部改以 `DATA_DIR` 為基底（原 `ANKI_DECK_NAME` slug 等規則不變）。
+- 新增 `config.LOG_FILE`（= `DATA_DIR/word_to_card.log`），`main.py` 改用之。
+
+**2. 截圖子行程在凍結環境的自我重啟（`screenshot.py` + `main.py`）**
+- 非 macOS 的框選截圖需在獨立子行程跑 tkinter；原作法 `[sys.executable, __file__, "--capture", path]` 在凍結後失效（`sys.executable` 是 onefile 執行檔、進入點是 `main.py` 而非 `screenshot.py`）。
+- 凍結時改以 `[sys.executable, "--capture", path]` 重新叫起自身；開發時維持 `[sys.executable, <screenshot.py 絕對路徑>, "--capture", path]`。
+- `main.py` 進入點在**任何 `GEMINI_API_KEY`／AnkiConnect 檢查之前**攔截 `--capture <path>`，直接執行框選擷取並以對應 exit code 結束。
+
+**3. PyInstaller 打包設定（`word-to-card.spec`）**
+- onefile、console；進入點 `main.py`，輸出名 `word-to-card`。
+- 對易漏套件使用 `collect_all`：`google.genai`、`edge_tts`、`pynput`（必要時含 `certifi`）。
+- `tkinter`／`PIL` 由 PyInstaller hook 自動納入。
+
+**4. 平台矩陣與發布（`.github/workflows/release.yml`）**
+- 觸發：推送 `v*` tag 自動打包＋發布；另支援 `workflow_dispatch`（手動，只打包、上傳 artifact，不建立 Release）。
+- 矩陣：`windows-latest`(x64)、`macos-latest`(Apple Silicon/arm64)、`macos-13`(Intel/x86_64)、`ubuntu-latest`(x64)。
+- 產物依平台命名後上傳：`word-to-card-windows-x64.exe`、`word-to-card-macos-arm64`、`word-to-card-macos-x64`、`word-to-card-linux-x64`。
+- 需 `permissions: contents: write` 供建立 Release。
+- 產物為**未簽章**：macOS 首次開啟需 `xattr -c` 或於「系統設定→隱私權與安全性」允許。
+
+**5. 無金鑰時的友善訊息（`llm.py`）**
+- 新版 `google-genai` 在無金鑰時會於 `genai.Client()` 建構即丟出 `ValueError`，使 `import llm` 直接失敗、蓋掉 `main()` 的「請設定 GEMINI_API_KEY」提示（打包成 exe 後尤其明顯）。
+- 改為**僅在有金鑰時**建立 client，否則設為 `None`；`main()` 會先檢查金鑰並結束，不會用到 client。
+
+### 驗收條件
+- **AC1**（本機打包）：於 `.venv` 執行 `pyinstaller word-to-card.spec` 可在 `dist/` 產生 `word-to-card`(.exe)。
+- **AC2**（凍結路徑）：執行打包後的執行檔，會讀取「執行檔同層的 `.env`」，並把 log／資料寫入 `DATA_DIR`（預設為執行檔同層），程式結束後資料仍保留（不寫入暫時解壓目錄）。
+- **AC3**（可設定）：設定 `W2C_DATA_DIR` 後，資料／log 改寫入指定目錄。
+- **AC4**（CI 發布）：推送 `v*` tag 後，Actions 於 4 個 target 完成打包，並把 4 個對應命名的執行檔上傳至同名 Release。
+- **AC5**（依賴完整）：打包後的執行檔能正確載入 `google.genai`／`edge_tts`／`pynput` 等套件；在缺少 `GEMINI_API_KEY` 時仍能啟動並印出明確錯誤後以 exit code 1 結束（非 `ModuleNotFoundError`）。
+- **AC6**（macOS 相容）：既有 macOS 從原始碼執行（`python main.py`）行為不變。

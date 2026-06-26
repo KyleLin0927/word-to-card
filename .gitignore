@@ -10,3 +10,7 @@ word_history/
 phrase_history/
 .DS_Store
 __pycache__/
+
+# PyInstaller
+build/
+dist/

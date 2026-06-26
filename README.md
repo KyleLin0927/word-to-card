@@ -86,6 +86,71 @@ tail -f word_to_card.log
 2026-04-16 14:32:21 [INFO] 完成：新增 2 張卡片（ephemeral、propitious）
 ```
 
+## 打包與發布（執行檔 / Build & Release）
+
+不想裝 Python 的使用者，可直接用打包好的執行檔。
+
+### 直接下載
+
+到本專案的 **Releases** 頁面，依平台下載：
+
+| 平台 | 檔案 |
+|------|------|
+| Windows x64 | `word-to-card-windows-x64.exe` |
+| macOS Apple Silicon | `word-to-card-macos-arm64` |
+| macOS Intel | `word-to-card-macos-x64` |
+| Linux x64 | `word-to-card-linux-x64` |
+
+執行前準備：
+
+1. 在**執行檔同層**放一個 `.env`（格式見 `.env.example`），至少填入 `GEMINI_API_KEY`。
+2. 先開啟 Anki 並安裝 AnkiConnect。
+
+> 資料（單字庫、歷史、log、截圖）預設寫在**執行檔同層**。要改放別處，在 `.env` 設 `W2C_DATA_DIR`：
+>
+> ```env
+> # 絕對路徑、~ 或相對路徑（相對執行檔）皆可
+> W2C_DATA_DIR=~/word-to-card-data
+> ```
+
+> **macOS 為未簽章檔**，首次開啟若出現「無法驗證開發者」：
+>
+> ```bash
+> xattr -c word-to-card-macos-arm64   # 或 -x64
+> chmod +x word-to-card-macos-arm64
+> ./word-to-card-macos-arm64
+> ```
+>
+> 或到「系統設定 → 隱私權與安全性」按「仍要開啟」。
+
+### 本機打包
+
+```bash
+source .venv/bin/activate
+pip install -r requirements.txt        # 已含 pyinstaller
+pyinstaller word-to-card.spec
+# 產物在 dist/word-to-card（Windows 為 word-to-card.exe）
+```
+
+### 自動發布（GitHub Actions）
+
+打包設定在 `word-to-card.spec`，CI 流程在 `.github/workflows/release.yml`。
+
+- **推送 `v*` tag** → 自動在 Windows / macOS(arm64) / macOS(Intel) / Linux 四個環境打包，並建立同名 GitHub Release、上傳四個執行檔。
+- **手動觸發**（Actions 分頁的 *Run workflow*）→ 只打包並上傳 artifact，不建立 Release，方便測試。
+
+發布新版本：
+
+```bash
+git add .
+git commit -m "release v1.0.0"
+git tag v1.0.0
+git push origin main
+git push origin v1.0.0
+```
+
+> 目前桌面通知／成功音效僅 macOS 有效（使用 `osascript`／`afplay`）；Windows / Linux 上通知會改寫入 log，核心的截圖→分析→寫入 Anki 流程仍可運作。
+
 ## 卡片格式
 
 | 欄位 | 內容 |

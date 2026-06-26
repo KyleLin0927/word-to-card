@@ -5,3 +5,6 @@ requests>=2.31.0
 python-dotenv>=1.0.0
 pyperclip>=1.9.0
 edge-tts>=7.0.0
+
+# 打包用（本機與 GitHub Actions 打包執行檔時需要）
+pyinstaller>=6.3
